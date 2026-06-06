@@ -140,7 +140,7 @@ function loadDBCIndex(string $cacheDir): array
         if (is_array($data) && count($data) > 1000) return $data;
     }
 
-    $dbcPath = dirname(__DIR__, 3) . '/dbc/ItemDisplayInfo.dbc';
+    $dbcPath = DBC_PATH . '/ItemDisplayInfo.dbc';
     $index   = buildDBCIndex($dbcPath);
 
     if (!empty($index)) {

@@ -92,9 +92,8 @@ function loadDBCIndex(string $cacheDir): array
         if (is_array($data) && count($data) > 1000) return $data;
     }
 
-    // Construir índice desde DBC
-    // Ruta: api/ → Migrador/ → lua_scripts/ → server/ → dbc/
-    $dbcPath = dirname(__DIR__, 3) . '/dbc/ItemDisplayInfo.dbc';
+    // Construir índice desde DBC (ruta configurada en config.php → DBC_PATH)
+    $dbcPath = DBC_PATH . '/ItemDisplayInfo.dbc';
     $index   = buildDBCIndex($dbcPath);
 
     if (!empty($index)) {

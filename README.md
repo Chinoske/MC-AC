@@ -80,7 +80,13 @@ SOAP.Port     = 7878
 
 ### 4. Pre-cachear íconos (recomendado)
 
-Ejecuta una sola vez tras instalar para que todos los íconos estén disponibles de inmediato:
+Primero asegúrate de que `DBC_PATH` en `config.php` apunte a la carpeta que contiene `ItemDisplayInfo.dbc`:
+
+```php
+define('DBC_PATH', 'C:/AzerothCoreRepack/server/dbc');  // ← ajusta esta ruta
+```
+
+Luego ejecuta una sola vez:
 
 ```bash
 php api/precache_icons.php
@@ -91,7 +97,7 @@ O desde el navegador: `http://localhost:8080/api/precache_icons.php`
 Procesa los ~46 000 items de `item_template` en ~75 s y genera `storage/icon_cache/`.  
 Para forzar reconstrucción: `?reset=1`
 
-> Requiere que el archivo `server/dbc/ItemDisplayInfo.dbc` exista. AzerothCore lo extrae con el extractor de datos del cliente.
+> `ItemDisplayInfo.dbc` lo extrae AzerothCore automáticamente con el extractor de datos del cliente de WoW.
 
 ---
 

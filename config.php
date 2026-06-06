@@ -108,6 +108,17 @@ define('ITEM_CONVERSIONS', [
 ]);
 
 // ═══════════════════════════════════════════════════════════════
+//  RUTA A LOS ARCHIVOS DBC DE AZEROTHCORE
+//  Carpeta que contiene ItemDisplayInfo.dbc (necesario para íconos).
+//  Cambia esta ruta si tus DBC están en otra ubicación.
+//  Ejemplos:
+//    'C:/AzerothCoreRepack/server/dbc'
+//    'D:/WoWServer/dbc'
+//    '/home/user/azerothcore/dbc'
+// ═══════════════════════════════════════════════════════════════
+define('DBC_PATH', 'C:/AzerothCoreRepack/server/dbc');
+
+// ═══════════════════════════════════════════════════════════════
 //  PATHS INTERNOS (no cambiar salvo que muevas carpetas)
 // ═══════════════════════════════════════════════════════════════
 define('ROOT_PATH',     __DIR__);
