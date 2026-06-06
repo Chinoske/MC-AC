@@ -6,6 +6,8 @@ Versión actualizada y modernizada desde el repositorio original:
 
 > **PHP 8.5.7 ya está incluido** en la carpeta `php/`. No necesitas instalar nada adicional.
 
+![Login](docs/screenshots/login.png)
+
 ---
 
 ## Inicio rápido
