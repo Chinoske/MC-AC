@@ -1,0 +1,16 @@
+# Caché de íconos generada automáticamente
+storage/icon_cache/
+
+# Sesiones PHP
+storage/sessions/
+
+# Archivos temporales
+*.tmp
+*.log
+
+# Claude Code
+.claude/
+
+# Windows
+desktop.ini
+Thumbs.db

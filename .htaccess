@@ -1,0 +1,39 @@
+Options -Indexes
+Options -ExecCGI
+
+# Bloquear acceso directo a carpetas sensibles
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # ── Proxy 3D: activos de wow.zamimg.com ───────────────────────
+    # GET /api/model/modelviewer/live/... → api/model_proxy.php?_path=...
+    RewriteRule ^api/model/(.+)$ api/model_proxy.php?_path=$1 [L,QSA]
+
+    # ── Proxy WotLK→Retail displayId conversion ───────────────────
+    # GET /api/wotlk_display/{entry}/{displayId} → api/wotlk_display.php?_path=...
+    RewriteRule ^api/wotlk_display/(.+)$ api/wotlk_display.php?_path=$1 [L,QSA]
+
+    # No permitir acceso a config.php directamente
+    RewriteRule ^config\.php$ - [F,L]
+
+    # Bloquear acceso a carpeta storage/
+    RewriteRule ^storage/ - [F,L]
+
+    # Forzar HTTPS si está disponible (descomentar en producción)
+    # RewriteCond %{HTTPS} off
+    # RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+</IfModule>
+
+# Headers de seguridad
+<IfModule mod_headers.c>
+    Header set X-Frame-Options "SAMEORIGIN"
+    Header set X-Content-Type-Options "nosniff"
+    Header set X-XSS-Protection "1; mode=block"
+    Header set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>
+
+# Bloquear acceso a archivos PHP en storage y transfer no explícitos
+<FilesMatch "\.(sql|log|bak|env|ini)$">
+    Order allow,deny
+    Deny from all
+</FilesMatch>

@@ -1,0 +1,8 @@
+## Interface: 30300
+## Title: CharDump
+## Notes: Exporta datos de tu personaje para transferencia al servidor
+## Author: AzerothCore Migration Tool
+## Version: 2.0
+## SavedVariables: ChardumpDB
+
+chardump.lua
