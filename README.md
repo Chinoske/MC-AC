@@ -46,6 +46,7 @@ Crea:
 - `account_transfer` — registro de todas las transferencias
 - `account_transfer_blacklist` — cuentas bloqueadas
 - `v_transfer_summary` — vista de resumen para reportes
+- `migrador_login_attempts` — intentos de login fallidos, para el rate limiting por IP
 
 ### 2. Configuración
 
@@ -176,11 +177,14 @@ personaje insertado directo en la DB nunca recibe (por saltarse
 Migrador/
 ├── Iniciar.bat                 ← Doble clic: inicia servidor + abre navegador
 ├── Detener.bat                 ← Detiene el servidor PHP
+├── router.php                  ← Headers de seguridad + bloqueo storage//.sql,
+│                                  ya que `php -S` no aplica `.htaccess`
+├── set_lang.php                ← Cambia el idioma activo (guardado en sesión)
 ├── config.php                  ← Configuración principal (edita esto)
 ├── index.php                   ← Login
 ├── dashboard.php               ← Panel jugador / GM
 ├── logout.php                  ← Cerrar sesión
-├── .htaccess                   ← Seguridad Apache (si usas Apache)
+├── .htaccess                   ← Seguridad Apache (si usas Apache en vez de Iniciar.bat)
 │
 ├── php/                        ← PHP 8.5.7 auto-contenido (no tocar)
 │   ├── php.exe
@@ -199,10 +203,11 @@ Migrador/
 │   ├── Session.php             ← Flash messages y helpers
 │   ├── Input.php               ← Entrada segura POST/GET
 │   ├── Validation.php          ← Validación de formularios
-│   └── Soap.php                ← Cliente SOAP para worldserver (urn:AC)
+│   ├── Soap.php                ← Cliente SOAP para worldserver (urn:AC)
+│   └── RateLimiter.php         ← Bloqueo temporal de login por IP
 │
 ├── transfer/
-│   ├── language.php            ← Traducciones (es/en/fr/de/ru)
+│   ├── language.php            ← Traducciones (es/en/fr/de/ru/pt) + selector de idioma
 │   ├── functions.php           ← Lógica de transferencia
 │   ├── dbfunctions.php         ← Operaciones DB
 │   ├── step1.php               ← Subir chardump
@@ -282,13 +287,30 @@ entry ──> api/icon.php ──> storage/icon_cache/<entry>.txt ──> CDN Wo
 - **Acceso por rol**: GMs ven panel completo; jugadores solo sus transferencias
 - **Verificación de propiedad**: jugadores solo cancelan sus propias transferencias
 - **Límite de tamaño** en uploads (5 MB)
+- **`router.php`** — el servidor que arranca `Iniciar.bat` es el *built-in server*
+  de PHP (`php -S`), que **no lee `.htaccess`** (eso es exclusivo de Apache). El
+  router aplica en cada request los headers de seguridad (`X-Frame-Options`,
+  `X-Content-Type-Options`, `X-XSS-Protection`, `Referrer-Policy`) y bloquea con
+  403 el acceso directo a `/storage/` y a archivos `.sql`, `.log`, `.bak`, `.env`,
+  `.ini` — protecciones que antes solo existían en `.htaccess` y nunca se
+  aplicaban en la práctica.
+- **Rate limiting de login** (`classes/RateLimiter.php`) — bloquea una IP
+  durante 15 minutos tras 5 intentos fallidos en una ventana de 15 minutos
+  (tabla `migrador_login_attempts` en `acore_auth`). El cálculo del tiempo
+  restante se hace enteramente en SQL (`TIMESTAMPDIFF`) para evitar un desfase
+  si PHP y MySQL no comparten zona horaria.
 
 ---
 
 ## 🌐 Idiomas soportados
 
-`es` · `en` · `fr` · `de` (ru parcial)  
-Cambia `DEFAULT_LANG` en `config.php` para ajustar el idioma por defecto.
+`es` · `en` · `fr` · `de` · `ru` · `pt` — selector de idioma en la UI (login,
+dashboard y ambos pasos de transferencia) que guarda la elección en sesión y
+recarga la página automáticamente al cambiar. Cubre tanto los textos de la
+interfaz como el vocabulario del preview de personaje (stats, clases/razas,
+tipos de daño, sockets, triggers de hechizo, nombres de slot de equipo).  
+Cambia `DEFAULT_LANG` en `config.php` para ajustar el idioma por defecto
+cuando el jugador no eligió ninguno.
 
 ---
 
