@@ -69,15 +69,19 @@ function isAccountBlacklisted(int $accountId): bool
 /**
  * Devuelve el nivel GM de una cuenta (0 si no es GM).
  * account_access: id=account_id, gmlevel, RealmID (-1 = todos)
+ * -1 cubre "todos los realms"; el resto son los realms realmente
+ * configurados en REALMS (config.php), no solo el 1.
  */
 function getGMLevel(int $accountId): int
 {
     try {
+        $realmIds     = array_merge([-1], array_keys(REALMS));
+        $placeholders = implode(',', array_fill(0, count($realmIds), '?'));
         $row = DB::auth()->row(
-            'SELECT MAX(`gmlevel`) AS `gmlevel`
+            "SELECT MAX(`gmlevel`) AS `gmlevel`
                FROM `account_access`
-              WHERE `id` = ? AND `RealmID` IN (-1, 1)',
-            [$accountId]
+              WHERE `id` = ? AND `RealmID` IN ({$placeholders})",
+            [$accountId, ...$realmIds]
         );
         return $row ? (int) $row->gmlevel : 0;
     } catch (Throwable) {
@@ -183,6 +187,7 @@ function applyCharacterDump(int $realmId, string $dump, int $targetAccountId): i
         try {
             $importer = new CharacterImporter($realmId, $targetAccountId);
             $result   = $importer->import($dump);
+            refreshCharacterCache($realmId, $result['name']);
             return (int) $result['guid'];
         } catch (Throwable $e) {
             error_log('[Migrador] CharacterImporter error: ' . $e->getMessage());
@@ -284,6 +289,30 @@ function approveCharacterTransfer(int $guid, int $realmId, int $targetAccountId)
 function getRealmName(int $realmId): string
 {
     return REALMS[$realmId]['name'] ?? "Realm #{$realmId}";
+}
+
+/**
+ * Registra un personaje recien importado en el CharacterCache en memoria
+ * del worldserver (GetCharacterCacheByGuid). Un INSERT directo en
+ * `characters` nunca pasa por Player::Create() ni por el resto de los
+ * puntos donde el core normalmente llama
+ * sCharacterCache->AddCharacterCacheEntry() - sin esto, cualquier
+ * SMSG_NAME_QUERY para ese GUID (chat, /who, nameplates, etc.) devuelve
+ * "Unknown Entity" hasta que se reinicie el worldserver, aunque el
+ * personaje cargue y juegue con normalidad.
+ *
+ * `.cache refresh` (cs_cache.cpp) es exactamente el comando GM que ya usa
+ * AzerothCore para este mismo problema en su propia herramienta de
+ * importación (.pdump load) - lo disparamos por SOAP en vez de duplicar
+ * su lógica.
+ */
+function refreshCharacterCache(int $realmId, string $charName): void
+{
+    try {
+        (new Soap($realmId))->command("cache refresh {$charName}");
+    } catch (Throwable $e) {
+        error_log("[Migrador] cache refresh falló para {$charName}: " . $e->getMessage());
+    }
 }
 
 /**

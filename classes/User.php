@@ -125,16 +125,22 @@ class User
         session_destroy();
     }
 
-    /** Devuelve el nivel GM del usuario. 0 = jugador, 1+ = GM/Admin */
+    /**
+     * Devuelve el nivel GM del usuario. 0 = jugador, 1+ = GM/Admin
+     * -1 en RealmID cubre "todos los realms"; el resto son los realms
+     * realmente configurados en REALMS (config.php), no solo el 1.
+     */
     public function gmLevel(): int
     {
         if (!$this->loggedIn || !$this->data) return 0;
         try {
+            $realmIds  = array_merge([-1], array_keys(REALMS));
+            $placeholders = implode(',', array_fill(0, count($realmIds), '?'));
             $row = DB::auth()->row(
-                'SELECT MAX(`gmlevel`) AS `gmlevel`
+                "SELECT MAX(`gmlevel`) AS `gmlevel`
                    FROM `account_access`
-                  WHERE `id` = ? AND `RealmID` IN (-1, 1)',
-                [(int) $this->data->id]
+                  WHERE `id` = ? AND `RealmID` IN ({$placeholders})",
+                [(int) $this->data->id, ...$realmIds]
             );
             return $row ? (int) $row->gmlevel : 0;
         } catch (Throwable) {

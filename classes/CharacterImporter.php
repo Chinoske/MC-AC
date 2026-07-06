@@ -23,6 +23,13 @@ class CharacterImporter
     private const SPAWN_ALLIANCE = ['map' => 0,  'x' => -8833.38, 'y' => 628.62,  'z' => 94.00,  'o' => 0.0];
     private const SPAWN_HORDE    = ['map' => 1,  'x' => 1569.59,  'y' => -4397.63,'z' => 16.06,  'o' => 0.0];
 
+    // Object::_LoadIntoDataField() (Object.cpp) exige exactamente N enteros
+    // separados por espacio o descarta el campo entero como "invalido" -
+    // NULL/vacio no es aceptado, aunque el valor final sea "todo en cero".
+    // PLAYER_EXPLORED_ZONES_SIZE = 128, KNOWN_TITLES_SIZE * 2 = 6 (Player.h)
+    private const EMPTY_EXPLORED_ZONES = '0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0';
+    private const EMPTY_KNOWN_TITLES   = '0 0 0 0 0 0';
+
     // Razas y su facción: 0=Alliance, 1=Horde
     private const RACE_FACTION = [
         1 => 0, // Human
@@ -120,6 +127,7 @@ class CharacterImporter
         $this->data = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
 
         $this->validate();
+        $this->loadValidEntries();
 
         $this->pdo->beginTransaction();
         try {
@@ -137,6 +145,7 @@ class CharacterImporter
             $this->insertGlyphs();
             $this->insertReputations();
             $this->insertHomebind();
+            $this->insertActionBar();
 
             // Enviar por correo los items que no cupieron
             $allExcess = array_merge($excessInventory, $excessBank);
@@ -205,6 +214,51 @@ class CharacterImporter
     /** @var array<int,object{displayid:int,InventoryType:int}> entry → datos world */
     private array $equippedItemMeta = [];
 
+    /** @var array<int,true> entries que realmente existen en item_template */
+    private array $validEntries = [];
+
+    /**
+     * Carga en $validEntries todos los entries de equipped/bags/bank que
+     * realmente existen en item_template. Un dump manipulado (o
+     * desincronizado con la versión de item_template del servidor) puede
+     * traer entries inexistentes; sin este chequeo se insertarían igual
+     * en item_instance/character_inventory, dejando referencias muertas
+     * que el cliente/servidor no pueden resolver al cargar el personaje.
+     */
+    private function loadValidEntries(): void
+    {
+        $entries = [];
+        foreach (['equipped', 'bags', 'bank'] as $bucket) {
+            foreach (($this->data[$bucket] ?? []) as $item) {
+                $entry = $this->convertItem((int)($item['entry'] ?? 0));
+                if ($entry > 0) $entries[] = $entry;
+            }
+        }
+        $entries = array_unique($entries);
+        if (empty($entries)) return;
+
+        try {
+            $in   = implode(',', $entries);
+            $rows = $this->pdo->query(
+                "SELECT entry FROM acore_world.item_template WHERE entry IN ({$in})"
+            )->fetchAll(PDO::FETCH_COLUMN);
+            foreach ($rows as $entry) {
+                $this->validEntries[(int)$entry] = true;
+            }
+        } catch (Throwable $e) {
+            // Si el lookup falla, no bloqueamos el import completo por esto -
+            // isValidEntry() tratará todo como inválido y los items se
+            // omitirán (más seguro que insertar entries sin verificar).
+            error_log('[Migrador] loadValidEntries falló: ' . $e->getMessage());
+        }
+    }
+
+    /** ¿El entry existe realmente en item_template? */
+    private function isValidEntry(int $entry): bool
+    {
+        return isset($this->validEntries[$entry]);
+    }
+
     private function buildEquipmentCache(): string
     {
         $equipped = $this->data['equipped'] ?? [];
@@ -242,18 +296,25 @@ class CharacterImporter
 
         // Construir los 23 pares (DB slots 0-22); validar InventoryType antes de incluir en cache
         // Slots 0-18 = equipo; Slots 19-22 = bolsas equipadas
+        //
+        // IMPORTANTE: cada par es "itemEntry enchantId", NO "displayId enchantId".
+        // Player::BuildEnumData (Player.cpp) busca el ItemTemplate por entry y
+        // recién ahí lee su DisplayInfoID - guardar el displayid directamente
+        // aquí hacía que ese lookup buscara un item_template.entry que no
+        // existe (o, peor, uno real pero equivocado), rompiendo el enum de
+        // personajes de la cuenta entera al loguear.
         $parts = [];
         for ($s = 0; $s < 23; $s++) {
-            $displayId = 0;
+            $cacheEntry = 0;
             $entry = $slotEntry[$s] ?? 0;
             if ($entry > 0) {
                 $meta    = $this->equippedItemMeta[$entry] ?? null;
                 $invType = $meta ? (int)$meta->InventoryType : 0;
                 if ($meta && $this->isValidForSlot($s, $invType)) {
-                    $displayId = (int)$meta->displayid;
+                    $cacheEntry = $entry;
                 }
             }
-            $parts[] = "{$displayId} 0";
+            $parts[] = "{$cacheEntry} 0";
         }
         return implode(' ', $parts) . ' ';
     }
@@ -319,6 +380,16 @@ class CharacterImporter
         // Zona de spawn: 1519 = Stormwind, 1637 = Orgrimmar
         $zone = $faction === 1 ? 1637 : 1519;
 
+        // at_login = 5 (AT_LOGIN_RENAME | AT_LOGIN_RESET_TALENTS): fuerza el
+        // dialogo de renombrar en el primer login (el jugador confirmo su
+        // nombre en la web, pero esto obliga al cliente a re-registrar el
+        // personaje como "nuevo" localmente) y resetea talentos ya que se
+        // insertaron directo en character_talent sin pasar por el sistema
+        // de puntos de talento del cliente.
+        //
+        // cinematic = 1: marca el video de introduccion de la raza como ya
+        // visto, para que un personaje migrado no lo dispare al entrar por
+        // primera vez (como si fuera recien creado).
         $stmt = $this->pdo->prepare(
             'INSERT INTO `characters`
              (`guid`,`account`,`name`,`race`,`class`,`gender`,`level`,`xp`,
@@ -345,18 +416,18 @@ class CharacterImporter
               ?,0,0,0,0,0,
               0,0,0,
               ?,?,?,?,?,
-              0,0,"",0,0,
+              0,0,"",0,1,
               0,0,0,0,0.0,
               0,0,
               0,0,0,0,0,
-              0,0,4,?,
+              0,0,5,?,
               0,NULL,
               ?,?,0,0,
               0,0,0,0,
               0,0,0,0,
               0,0,0,0,0,0,0,
               0,1,0,
-              NULL,?,0,NULL,
+              \'' . self::EMPTY_EXPLORED_ZONES . '\',?,0,\'' . self::EMPTY_KNOWN_TITLES . '\',
               0,0,
               NULL,NULL,NULL,
               0,0)'
@@ -436,6 +507,10 @@ class CharacterImporter
             if ($entry <= 0) continue;
             if ($this->isBlockedItem($entry)) continue;
             $entry = $this->convertItem($entry);
+            if (!$this->isValidEntry($entry)) {
+                error_log("[Migrador] Item entry={$entry} no existe en item_template, omitido (equipped).");
+                continue;
+            }
 
             $luaSlot = (int)($item['slot'] ?? 1);
             $dbSlot  = $luaSlot - 1;  // Lua 1-23 → DB 0-22
@@ -476,6 +551,10 @@ class CharacterImporter
             if ($entry <= 0) continue;
             if ($this->isBlockedItem($entry)) continue;
             $entry = $this->convertItem($entry);
+            if (!$this->isValidEntry($entry)) {
+                error_log("[Migrador] Item entry={$entry} no existe en item_template, omitido (bags).");
+                continue;
+            }
 
             $count   = max(1, (int)($item['count'] ?? 1));
             $enchStr = $this->buildEnchStr($item);
@@ -509,6 +588,10 @@ class CharacterImporter
             if ($entry <= 0) continue;
             if ($this->isBlockedItem($entry)) continue;
             $entry = $this->convertItem($entry);
+            if (!$this->isValidEntry($entry)) {
+                error_log("[Migrador] Item entry={$entry} no existe en item_template, omitido (bank).");
+                continue;
+            }
 
             $count   = max(1, (int)($item['count'] ?? 1));
             $enchStr = $this->buildEnchStr($item);
@@ -584,6 +667,46 @@ class CharacterImporter
     }
 
     // ── Skills ───────────────────────────────────────────────
+    //
+    // Profesiones y secundarias (Pesca/Cocina/Primeros Auxilios) no
+    // dependen del nivel del personaje sino de su propio entrenamiento -
+    // no aparecen en acore_world.playercreateinfo_skills (esa tabla es
+    // solo lo que un personaje tiene "de fabrica" al crearse). Si el dump
+    // trae alguna, la llevamos a su tope (400) en vez de dejar el valor
+    // que traiga.
+    private const PROFESSION_AND_SECONDARY_SKILLS = [
+        171, // Alchemy
+        164, // Blacksmithing
+        333, // Enchanting
+        202, // Engineering
+        182, // Herbalism
+        773, // Inscription
+        755, // Jewelcrafting
+        165, // Leatherworking
+        186, // Mining
+        393, // Skinning
+        197, // Tailoring
+        356, // Fishing
+        185, // Cooking
+        129, // First Aid
+    ];
+
+    // Plate Mail (293): a diferencia de Mail/Leather/Shield/armas, esta
+    // proficiency NO esta en playercreateinfo_skills para Guerrero(1) ni
+    // Paladin(2) - un personaje de esas clases la consigue mas adelante
+    // en el juego (nivel/quest), no "de fabrica". Death Knight(6) si la
+    // tiene de fabrica (empieza pre-nivelado), asi que no necesita este
+    // caso especial. Un personaje migrado directo a nivel alto se salta
+    // ese paso intermedio, asi que se la damos a mano.
+    private const PLATE_MAIL_SKILL      = 293;
+    private const PLATE_CLASSES_MISSING = [1, 2]; // Warrior, Paladin
+
+    // Comentarios de playercreateinfo_skills que NO escalan con nivel/
+    // combate (idiomas, pasivas raciales, monturas, mascota de compañia)
+    // y por lo tanto no tiene sentido forzar a 400.
+    private const SKIP_SKILL_COMMENT_PATTERNS = [
+        'Language:%', '%- Racial', 'Mounts', 'Companion Pets', 'GENERIC (DND)',
+    ];
 
     private function insertSkills(): void
     {
@@ -597,6 +720,69 @@ class CharacterImporter
             $max   = (int)($sk['max']   ?? 300);
             if ($id > 0) {
                 $stmt->execute([$this->newGuid, $id, $value, $max]);
+            }
+        }
+
+        $this->maxClassWeaponAndArmorSkills();
+        $this->maxKnownProfessionSkills();
+    }
+
+    /**
+     * Sube al tope (400) los skills de arma/armadura/defensa que le
+     * corresponden de fabrica a la raza/clase del personaje, leyendo
+     * directo de acore_world.playercreateinfo_skills (misma tabla que usa
+     * Player::LearnDefaultSkills() en el core) - no hay que adivinar
+     * ningun id a mano.
+     */
+    private function maxClassWeaponAndArmorSkills(): void
+    {
+        $basic   = $this->data['basic'] ?? [];
+        $raceId  = is_numeric($basic['race'] ?? '') ? (int)$basic['race'] : 1;
+        $classId = is_numeric($basic['class'] ?? '') ? (int)$basic['class'] : 1;
+
+        $raceMask  = 1 << ($raceId - 1);
+        $classMask = 1 << ($classId - 1);
+
+        $skipConds = implode(' AND ', array_fill(0, count(self::SKIP_SKILL_COMMENT_PATTERNS), '`comment` NOT LIKE ?'));
+
+        try {
+            $stmt = $this->pdo->prepare(
+                "SELECT DISTINCT skill FROM acore_world.playercreateinfo_skills
+                 WHERE (raceMask = 0 OR raceMask & {$raceMask})
+                   AND (classMask = 0 OR classMask & {$classMask})
+                   AND {$skipConds}"
+            );
+            $stmt->execute(self::SKIP_SKILL_COMMENT_PATTERNS);
+            $skillIds = $stmt->fetchAll(PDO::FETCH_COLUMN);
+        } catch (Throwable) {
+            return;
+        }
+
+        if (in_array($classId, self::PLATE_CLASSES_MISSING, true)) {
+            $skillIds[] = self::PLATE_MAIL_SKILL;
+        }
+
+        $upsert = $this->pdo->prepare(
+            'INSERT INTO `character_skills` (`guid`,`skill`,`value`,`max`) VALUES (?,?,400,400)
+             ON DUPLICATE KEY UPDATE `value` = 400, `max` = 400'
+        );
+        foreach (array_unique($skillIds) as $skillId) {
+            $upsert->execute([$this->newGuid, (int)$skillId]);
+        }
+    }
+
+    /** Sube a 400 las profesiones/secundarias que el dump ya trae. */
+    private function maxKnownProfessionSkills(): void
+    {
+        $skills = $this->data['skills'] ?? [];
+        $upsert = $this->pdo->prepare(
+            'INSERT INTO `character_skills` (`guid`,`skill`,`value`,`max`) VALUES (?,?,400,400)
+             ON DUPLICATE KEY UPDATE `value` = 400, `max` = 400'
+        );
+        foreach ($skills as $sk) {
+            $id = (int)($sk['id'] ?? 0);
+            if (in_array($id, self::PROFESSION_AND_SECONDARY_SKILLS, true)) {
+                $upsert->execute([$this->newGuid, $id]);
             }
         }
     }
@@ -696,6 +882,39 @@ class CharacterImporter
             $spawn['map'], $areaId,
             $spawn['x'], $spawn['y'], $spawn['z'],
         ]);
+    }
+
+    // ── Barra de acciones por defecto ─────────────────────────
+    //
+    // Player::Create() rellena la barra de acciones desde
+    // acore_world.playercreateinfo_action al crear un personaje nuevo por
+    // el cliente. Un INSERT directo se salta ese paso y deja la barra
+    // vacia - ni el boton de Ataque basico. playercreateinfo_action es una
+    // tabla real y ya poblada (a diferencia de las tablas *_dbc, que estan
+    // vacias en esta instalacion), asi que podemos leerla directo.
+
+    private function insertActionBar(): void
+    {
+        $basic  = $this->data['basic'] ?? [];
+        $raceId  = is_numeric($basic['race'] ?? '') ? (int)$basic['race'] : 1;
+        $classId = is_numeric($basic['class'] ?? '') ? (int)$basic['class'] : 1;
+
+        try {
+            $rows = $this->pdo->query(
+                "SELECT button, action, type FROM acore_world.playercreateinfo_action
+                 WHERE race = {$raceId} AND class = {$classId}"
+            )->fetchAll(PDO::FETCH_OBJ);
+        } catch (Throwable) {
+            return; // sin barra de acciones por defecto, no es fatal
+        }
+        if (empty($rows)) return;
+
+        $stmt = $this->pdo->prepare(
+            'INSERT IGNORE INTO `character_action` (`guid`,`spec`,`button`,`action`,`type`) VALUES (?,0,?,?,?)'
+        );
+        foreach ($rows as $r) {
+            $stmt->execute([$this->newGuid, (int)$r->button, (int)$r->action, (int)$r->type]);
+        }
     }
 
     // ── Sincronización realmcharacters ───────────────────────
