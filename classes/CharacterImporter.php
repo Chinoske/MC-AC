@@ -46,30 +46,31 @@ class CharacterImporter
 
     // Nombre legible de cada slot de equipo (base-0 = DB, base-1 = Lua)
     // DB slots 0-18 = equipo; DB slots 19-22 = contenedores de bolsas equipadas
+    // Valores = claves de traducción (transfer/language.php), resueltas con t() en el consumidor.
     public const SLOT_NAMES = [
-        0  => 'Cabeza',
-        1  => 'Cuello',
-        2  => 'Hombros',
-        3  => 'Camisa',
-        4  => 'Pecho',
-        5  => 'Cintura',
-        6  => 'Piernas',
-        7  => 'Pies',
-        8  => 'Muñecas',
-        9  => 'Guantes',
-        10 => 'Dedo 1',
-        11 => 'Dedo 2',
-        12 => 'Trinket 1',
-        13 => 'Trinket 2',
-        14 => 'Espalda',
-        15 => 'Mano Ppal.',
-        16 => 'Mano Sec.',
-        17 => 'A distancia',
-        18 => 'Tabardo',
-        19 => 'Bolsa 1',
-        20 => 'Bolsa 2',
-        21 => 'Bolsa 3',
-        22 => 'Bolsa 4',
+        0  => 'slot_head',
+        1  => 'slot_neck',
+        2  => 'slot_shoulders',
+        3  => 'slot_shirt',
+        4  => 'slot_chest',
+        5  => 'slot_waist',
+        6  => 'slot_legs',
+        7  => 'slot_feet',
+        8  => 'slot_wrists',
+        9  => 'slot_hands',
+        10 => 'slot_finger1',
+        11 => 'slot_finger2',
+        12 => 'slot_trinket1',
+        13 => 'slot_trinket2',
+        14 => 'slot_back',
+        15 => 'slot_mainhand',
+        16 => 'slot_offhand',
+        17 => 'slot_ranged',
+        18 => 'slot_tabard',
+        19 => 'slot_bag1',
+        20 => 'slot_bag2',
+        21 => 'slot_bag3',
+        22 => 'slot_bag4',
     ];
 
     /**
@@ -619,9 +620,8 @@ class CharacterImporter
         $mailId = $this->insertMail(
             0,                    // sender = 0 (system)
             $this->newGuid,       // receiver
-            'Transferencia — Items adicionales',
-            'Estos items no cabían en tu inventario ni en el banco durante la importación.'
-                . "\nPuedes recogerlos aquí.",
+            t('mail_subject_excess_items'),
+            t('mail_body_excess_items'),
             $now,
             $now + (30 * 24 * 3600)  // expire in 30 days
         );

@@ -29,7 +29,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     else {
         $realmId = (int) Input::get('realm');
         if (!isset(REALMS[$realmId])) {
-            $error = 'Realm inválido.';
+            $error = t('invalid_realm');
         }
         // ── Validar archivo subido ───────────────────────────
         elseif (empty($_FILES['dump_file']['tmp_name']) || $_FILES['dump_file']['error'] !== UPLOAD_ERR_OK) {
@@ -42,7 +42,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!str_ends_with(strtolower($file['name']), '.lua')) {
                 $error = t('invalid_file');
             } elseif ($file['size'] > $maxSize) {
-                $error = 'El archivo supera el tamaño máximo (5 MB).';
+                $error = t('file_too_large');
             } else {
                 $rawContent = file_get_contents($file['tmp_name']);
 
@@ -94,7 +94,7 @@ $realmList = getRealmList();
 $token     = Token::generate();
 ?>
 <!DOCTYPE html>
-<html lang="<?= DEFAULT_LANG ?>">
+<html lang="<?= currentLang() ?>">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -103,8 +103,9 @@ $token     = Token::generate();
 </head>
 <body>
 <nav class="navbar">
-    <div class="nav-brand">⚔ Migrador AC</div>
+    <div class="nav-brand">⚔ <?= t('app_name') ?></div>
     <div class="nav-right">
+        <?php renderLangSwitcher(); ?>
         <span class="nav-user"><?= htmlspecialchars($user->name()) ?></span>
         <a href="../dashboard.php" class="btn btn-sm btn-outline"><?= t('btn_back') ?></a>
         <a href="../logout.php" class="btn btn-sm btn-outline"><?= t('logout') ?></a>
@@ -147,7 +148,7 @@ $token     = Token::generate();
                     <input type="file" name="dump_file" id="dump_file"
                            accept=".lua" required style="display:none">
                     <label for="dump_file" class="file-drop-label">
-                        📄 <span id="fileName">Haz clic o arrastra aquí tu <code>chardump.lua</code></span>
+                        📄 <span id="fileName"><?= t('file_drop_prompt') ?></span>
                     </label>
                 </div>
             </div>
@@ -158,6 +159,10 @@ $token     = Token::generate();
         </form>
     </div>
 </main>
+<script>window.MIGRADOR_I18N = <?= json_encode(['deny_reason_required' => t('js_deny_reason_required'), 'lua_only' => t('js_lua_only')], JSON_UNESCAPED_UNICODE) ?>;</script>
 <script src="../assets/js/app.js"></script>
 </body>
 </html>
+
+
+

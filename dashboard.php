@@ -24,7 +24,7 @@ $statusLabels  = ['pending','approved','denied','cancelled','resent'];
 $statusIcons   = ['⏳','✅','❌','🚫','📨'];
 ?>
 <!DOCTYPE html>
-<html lang="<?= DEFAULT_LANG ?>">
+<html lang="<?= currentLang() ?>">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -35,12 +35,13 @@ $statusIcons   = ['⏳','✅','❌','🚫','📨'];
 
 <!-- ── Navbar ──────────────────────────────────────────────── -->
 <nav class="navbar">
-    <div class="nav-brand">⚔ Migrador AC</div>
+    <div class="nav-brand">⚔ <?= t('app_name') ?></div>
     <div class="nav-right">
+        <?php renderLangSwitcher(); ?>
         <span class="nav-user">
             <?= t('welcome') ?>, <b><?= htmlspecialchars($user->name()) ?></b>
             <?php if ($isGM): ?>
-                <span class="badge badge-gm">GM Lvl <?= $user->gmLevel() ?></span>
+                <span class="badge badge-gm"><?= t('gm_level') ?> <?= $user->gmLevel() ?></span>
             <?php endif; ?>
         </span>
         <a href="logout.php" class="btn btn-sm btn-outline"><?= t('logout') ?></a>
@@ -66,7 +67,7 @@ $statusIcons   = ['⏳','✅','❌','🚫','📨'];
             <h3>💡 <?= t('instructions_title') ?></h3>
             <div class="instructions-text"><?= t('instructions') ?></div>
             <a href="transfer/step1.php" class="btn btn-primary mt-2">
-                📂 Iniciar transferencia
+                📂 <?= t('btn_start_transfer') ?>
             </a>
         </div>
     </section>
@@ -76,7 +77,7 @@ $statusIcons   = ['⏳','✅','❌','🚫','📨'];
         <div class="card-header">
             <h2><?= $isGM ? '🛡 ' . t('gm_panel') : '📋 ' . t('player_panel') ?></h2>
             <?php if ($isGM): ?>
-            <button class="btn btn-sm btn-outline" onclick="location.reload()">🔄 Actualizar</button>
+            <button class="btn btn-sm btn-outline" onclick="location.reload()">🔄 <?= t('btn_refresh') ?></button>
             <?php endif; ?>
         </div>
         <div class="card-body">
@@ -91,17 +92,17 @@ $statusIcons   = ['⏳','✅','❌','🚫','📨'];
             <thead>
                 <tr>
                     <th>#</th>
-                    <th>Personaje</th>
-                    <th>Realm</th>
+                    <th><?= t('table_character') ?></th>
+                    <th><?= t('table_realm') ?></th>
                     <?php if ($isGM): ?>
-                    <th>Cuenta</th>
+                    <th><?= t('table_account') ?></th>
                     <?php endif; ?>
-                    <th>Estado</th>
-                    <th>Fecha</th>
+                    <th><?= t('table_status') ?></th>
+                    <th><?= t('table_date') ?></th>
                     <?php if ($isGM): ?>
-                    <th>Motivo</th>
+                    <th><?= t('table_reason') ?></th>
                     <?php endif; ?>
-                    <th>Acciones</th>
+                    <th><?= t('table_actions') ?></th>
                 </tr>
             </thead>
             <tbody>
@@ -166,7 +167,7 @@ $statusIcons   = ['⏳','✅','❌','🚫','📨'];
                         <!-- GM: Reenviar items (solo si ya fue importado) -->
                         <form method="POST" action="transfer/b_resend.php"
                               class="inline-form"
-                              onsubmit="return confirm('¿Reenviar items?')">
+                              onsubmit="return confirm('<?= t('confirm_resend') ?>')">
                             <input type="hidden" name="token"  value="<?= Token::generate() ?>">
                             <input type="hidden" name="id"     value="<?= (int) $tr->id ?>">
                             <input type="hidden" name="realm"  value="<?= (int) $tr->cRealmID ?>">
@@ -206,14 +207,19 @@ $statusIcons   = ['⏳','✅','❌','🚫','📨'];
         <h3>❌ <?= t('btn_deny') ?></h3>
         <p><?= t('deny_reason') ?></p>
         <textarea id="denyReasonText" rows="3" maxlength="255"
-                  placeholder="Escribe el motivo aquí…"></textarea>
+                  placeholder="<?= t('deny_reason_placeholder') ?>"></textarea>
         <div class="modal-actions">
             <button class="btn btn-danger" id="denyConfirmBtn"><?= t('btn_confirm') ?></button>
-            <button class="btn btn-outline" onclick="closeDenyModal()">Cancelar</button>
+            <button class="btn btn-outline" onclick="closeDenyModal()"><?= t('btn_cancel_plain') ?></button>
         </div>
     </div>
 </div>
 
+<script>window.MIGRADOR_I18N = <?= json_encode(['deny_reason_required' => t('js_deny_reason_required'), 'lua_only' => t('js_lua_only')], JSON_UNESCAPED_UNICODE) ?>;</script>
 <script src="assets/js/app.js"></script>
 </body>
 </html>
+
+
+
+

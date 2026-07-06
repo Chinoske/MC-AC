@@ -28,7 +28,7 @@ $transferId = (int) Input::get('id');
 $realmId    = (int) Input::get('realm');
 
 if ($transferId <= 0 || $realmId <= 0) {
-    Session::flash('error', 'Parámetros inválidos.');
+    Session::flash('error', t('invalid_params'));
     header('Location: ../dashboard.php');
     exit;
 }

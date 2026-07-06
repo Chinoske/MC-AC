@@ -24,7 +24,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (file) {
                 // Verificar extensión
                 if (!file.name.toLowerCase().endsWith('.lua')) {
-                    showToast('Solo se aceptan archivos .lua', 'error');
+                    showToast(i18n('lua_only', 'Solo se aceptan archivos .lua'), 'error');
                     return;
                 }
                 // Asignar al input
@@ -59,7 +59,7 @@ document.addEventListener('DOMContentLoaded', () => {
         denyConfirmBtn.addEventListener('click', () => {
             const reasonText = document.getElementById('denyReasonText').value.trim();
             if (!reasonText) {
-                showToast('Escribe un motivo de denegación', 'error');
+                showToast(i18n('deny_reason_required', 'Escribe un motivo de denegación'), 'error');
                 return;
             }
             if (activeDenyForm) {
@@ -131,4 +131,8 @@ function showToast(message, type = 'success') {
         toast.style.transition = 'opacity 0.4s';
         setTimeout(() => toast.remove(), 400);
     }, 4000);
+}
+
+function i18n(key, fallback) {
+    return (window.MIGRADOR_I18N && window.MIGRADOR_I18N[key]) || fallback || key;
 }

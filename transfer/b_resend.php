@@ -30,7 +30,7 @@ $realmId    = (int) Input::get('realm');
 $guid       = (int) Input::get('guid');
 
 if ($transferId <= 0 || $realmId <= 0 || $guid <= 0) {
-    Session::flash('error', 'Parámetros inválidos.');
+    Session::flash('error', t('invalid_params'));
     header('Location: ../dashboard.php');
     exit;
 }
@@ -53,7 +53,7 @@ if ($status !== 0 && $status !== 1) {
 // Obtener el nombre del personaje
 $charName = getCharacterName($guid, $realmId);
 if (!$charName) {
-    Session::flash('error', 'No se encontró el personaje en la base de datos.');
+    Session::flash('error', t('character_not_found'));
     header('Location: ../dashboard.php');
     exit;
 }
@@ -77,7 +77,7 @@ try {
     }
 
     if (!empty($itemArray)) {
-        sendItemsByMail($realmId, $charName, $itemArray, 'Transfer Items');
+        sendItemsByMail($realmId, $charName, $itemArray, t('mail_subject_transfer_items'));
     }
 } catch (Throwable $e) {
     error_log('[Migrador] Error obteniendo items para reenvío: ' . $e->getMessage());

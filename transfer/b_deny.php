@@ -31,7 +31,7 @@ $realmId    = (int) Input::get('realm');
 $reason     = trim(Input::get('reason') ?? '');
 
 if ($transferId <= 0 || $realmId <= 0) {
-    Session::flash('error', 'Parámetros inválidos.');
+    Session::flash('error', t('invalid_params'));
     header('Location: ../dashboard.php');
     exit;
 }
@@ -58,7 +58,7 @@ if ($guid > 0) {
 }
 
 // Marcar como denegado (2) con motivo
-updateTransferStatus($transferId, 2, $reason ?: 'Sin motivo especificado');
+updateTransferStatus($transferId, 2, $reason ?: t('no_reason_specified'));
 
 Session::flash('message', t('transfer_denied'));
 header('Location: ../dashboard.php');

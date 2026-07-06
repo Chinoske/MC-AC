@@ -83,7 +83,7 @@ if ($isJsonDump) {
 
 // ── Paleta de calidades ────────────────────────────────────────────
 $qColor = ['#9d9d9d','#ffffff','#1eff00','#0070dd','#a335ee','#ff8000','#e6cc80','#e6cc80'];
-$qName  = ['Malo','Común','Poco común','Raro','Épico','Legendario','Artefacto','Reliquia'];
+$qName  = [t('quality_poor'), t('quality_common'), t('quality_uncommon'), t('quality_rare'), t('quality_epic'), t('quality_legendary'), t('quality_artifact'), t('quality_heirloom')];
 $qClass = ['q0','q1','q2','q3','q4','q5','q6','q7'];
 
 // ── Construir mapa equipado: dbSlot → {entry, name, quality, invType, valid} ──
@@ -97,7 +97,7 @@ foreach (($dumpData['equipped'] ?? []) as $item) {
     if ($entry <= 0) continue;
 
     $idata     = $itemMap[$entry] ?? null;
-    $name      = $idata ? $idata->name             : "Item #{$entry}";
+    $name      = $idata ? $idata->name             : sprintf(t('item_placeholder_name'), $entry);
     $quality   = $idata ? (int)$idata->Quality      : 1;
     $invType   = $idata ? (int)$idata->InventoryType : 0;
     $displayId = $idata ? (int)$idata->displayid    : 0;
@@ -132,22 +132,22 @@ $arenapts = (int)($basic['arena_pts'] ?? 0);
 
 // Clase → color e ícono WoW
 $classInfo = [
-    1  => ['Guerrero',   '#C79C6E'], 2 => ['Paladín',    '#F58CBA'],
-    3  => ['Cazador',    '#ABD473'], 4 => ['Pícaro',     '#FFF569'],
-    5  => ['Sacerdote',  '#FFFFFF'], 6 => ['Caballero M','#C41F3B'],
-    7  => ['Chamán',     '#0070DE'], 8 => ['Mago',       '#69CCF0'],
-    9  => ['Brujo',      '#9482C9'], 11 => ['Druida',    '#FF7D0A'],
+    1  => [t('class_1'), '#C79C6E'], 2 => [t('class_2'), '#F58CBA'],
+    3  => [t('class_3'), '#ABD473'], 4 => [t('class_4'), '#FFF569'],
+    5  => [t('class_5'), '#FFFFFF'], 6 => [t('class_6'), '#C41F3B'],
+    7  => [t('class_7'), '#0070DE'], 8 => [t('class_8'), '#69CCF0'],
+    9  => [t('class_9'), '#9482C9'], 11 => [t('class_11'), '#FF7D0A'],
 ];
 $cls      = is_numeric($basic['class'] ?? '') ? (int)$basic['class'] : 1;
-$clsName  = $classInfo[$cls][0] ?? 'Desconocido';
+$clsName  = $classInfo[$cls][0] ?? t('unknown_m');
 $clsColor = $classInfo[$cls][1] ?? '#ffffff';
 
-$raceNames = [1=>'Humano',2=>'Orco',3=>'Enano',4=>'Elfo de noche',5=>'No-muerto',
-              6=>'Tauren',7=>'Gnomo',8=>'Trol',10=>'Elfo de sangre',11=>'Draenei'];
+$raceNames = [1=>t('race_1'),2=>t('race_2'),3=>t('race_3'),4=>t('race_4'),5=>t('race_5'),
+              6=>t('race_6'),7=>t('race_7'),8=>t('race_8'),10=>t('race_10'),11=>t('race_11')];
 $race     = is_numeric($basic['race'] ?? '') ? (int)$basic['race'] : 1;
-$raceName = $raceNames[$race] ?? 'Desconocida';
+$raceName = $raceNames[$race] ?? t('unknown_f');
 $gender   = (int)($basic['gender'] ?? 0);
-$genderStr= $gender === 0 ? 'Masculino' : 'Femenino';
+$genderStr= $gender === 0 ? t('gender_male') : t('gender_female');
 
 // Recuento de items en mochila y banco
 $bags     = $dumpData['bags'] ?? [];
@@ -215,7 +215,7 @@ function renderSlot(int $dbSlot, array $paperSlots, array $qColor, array $qClass
     echo '<img class="pslot-icon" src="" data-entry="' . (int)$s['entry'] . '" alt="" loading="lazy">';
     echo '<span class="pslot-fallback"></span>';
     echo '<span class="pslot-spinner"></span>';
-    if (!$s['valid']) echo '<span class="pslot-badge-warn" title="Item redirigido a mochila">⚠</span>';
+    if (!$s['valid']) echo '<span class="pslot-badge-warn" title="' . h(t('item_redirected_bag')) . '">⚠</span>';
     echo renderItemTooltip($s, $qColor, $qName, $label);
     echo '</div>';
 }
@@ -234,81 +234,47 @@ function itemField(?object $item, string $field, mixed $default = null): mixed
 
 function itemStatName(int $type): string
 {
-    return [
-        3 => 'Agilidad', 4 => 'Fuerza', 5 => 'Intelecto', 6 => 'Espíritu', 7 => 'Aguante',
-        12 => 'Índice de defensa', 13 => 'Índice de esquivar', 14 => 'Índice de parar',
-        15 => 'Índice de bloqueo', 16 => 'Índice de golpe cuerpo a cuerpo',
-        17 => 'Índice de golpe a distancia', 18 => 'Índice de golpe con hechizos',
-        19 => 'Índice de crítico cuerpo a cuerpo', 20 => 'Índice de crítico a distancia',
-        21 => 'Índice de crítico con hechizos', 28 => 'Índice de celeridad cuerpo a cuerpo',
-        29 => 'Índice de celeridad a distancia', 30 => 'Índice de celeridad con hechizos',
-        31 => 'Índice de golpe', 32 => 'Índice de golpe crítico', 35 => 'Índice de temple',
-        36 => 'Índice de celeridad', 37 => 'Índice de pericia', 38 => 'Poder de ataque',
-        39 => 'Poder de ataque a distancia', 40 => 'Poder de ataque feral',
-        41 => 'Sanación', 42 => 'Daño con hechizos', 43 => 'Maná cada 5 s',
-        44 => 'Penetración de armadura', 45 => 'Poder con hechizos',
-        46 => 'Salud cada 5 s', 47 => 'Penetración de hechizos', 48 => 'Valor de bloqueo',
-    ][$type] ?? "Stat {$type}";
+    $key = "stat_{$type}";
+    return array_key_exists($type, [
+        3=>1,4=>1,5=>1,6=>1,7=>1,12=>1,13=>1,14=>1,15=>1,16=>1,17=>1,18=>1,19=>1,20=>1,21=>1,
+        28=>1,29=>1,30=>1,31=>1,32=>1,35=>1,36=>1,37=>1,38=>1,39=>1,40=>1,41=>1,42=>1,43=>1,
+        44=>1,45=>1,46=>1,47=>1,48=>1,
+    ]) ? t($key) : sprintf(t('stat_unknown'), $type);
 }
 
 function itemDamageType(int $type): string
 {
-    return [0 => 'Físico', 1 => 'Sagrado', 2 => 'Fuego', 3 => 'Naturaleza', 4 => 'Escarcha', 5 => 'Sombras', 6 => 'Arcano'][$type] ?? "Tipo {$type}";
+    return ($type >= 0 && $type <= 6) ? t("dmgschool_{$type}") : sprintf(t('type'), $type);
 }
 
 function itemClassName(int $class, int $subclass): string
 {
-    $classes = [
-        0 => 'Consumible', 1 => 'Contenedor', 2 => 'Arma', 3 => 'Gema', 4 => 'Armadura',
-        5 => 'Componente', 6 => 'Proyectil', 7 => 'Material', 9 => 'Receta',
-        11 => 'Carcaj', 12 => 'Misión', 13 => 'Llave', 15 => 'Misceláneo', 16 => 'Glifo',
-    ];
-    $weapon = [
-        0 => 'Hacha 1M', 1 => 'Hacha 2M', 2 => 'Arco', 3 => 'Arma de fuego', 4 => 'Maza 1M',
-        5 => 'Maza 2M', 6 => 'Asta', 7 => 'Espada 1M', 8 => 'Espada 2M', 10 => 'Bastón',
-        13 => 'Arma de puño', 15 => 'Daga', 16 => 'Arrojadiza', 18 => 'Ballesta', 19 => 'Varita',
-        20 => 'Caña de pescar',
-    ];
-    $armor = [
-        0 => 'Misceláneo', 1 => 'Tela', 2 => 'Cuero', 3 => 'Malla', 4 => 'Placas',
-        6 => 'Escudo', 7 => 'Tratado', 8 => 'Ídolo', 9 => 'Tótem', 10 => 'Sigilo',
-    ];
-    if ($class === 2) return $weapon[$subclass] ?? 'Arma';
-    if ($class === 4) return $armor[$subclass] ?? 'Armadura';
-    return $classes[$class] ?? "Clase {$class}";
+    $classes = [0,1,2,3,4,5,6,7,9,11,12,13,15,16];
+    $weapon  = [0,1,2,3,4,5,6,7,8,10,13,15,16,18,19,20];
+    $armor   = [0,1,2,3,4,6,7,8,9,10];
+    if ($class === 2) return in_array($subclass, $weapon, true) ? t("weapon_{$subclass}") : t('iclass_2');
+    if ($class === 4) return in_array($subclass, $armor, true) ? t("armorsub_{$subclass}") : t('iclass_4');
+    return in_array($class, $classes, true) ? t("iclass_{$class}") : sprintf(t('type'), $class);
 }
 
 function itemBondingText(int $bonding): string
 {
-    return [
-        1 => 'Se liga al recogerlo',
-        2 => 'Se liga al equiparlo',
-        3 => 'Se liga al usarlo',
-        4 => 'Objeto de misión',
-        5 => 'Objeto de misión',
-    ][$bonding] ?? '';
+    return ($bonding >= 1 && $bonding <= 5) ? t("bonding_{$bonding}") : '';
 }
 
 function itemSocketName(int $socket): string
 {
     $parts = [];
-    if (($socket & 1) !== 0) $parts[] = 'Meta';
-    if (($socket & 2) !== 0) $parts[] = 'Rojo';
-    if (($socket & 4) !== 0) $parts[] = 'Amarillo';
-    if (($socket & 8) !== 0) $parts[] = 'Azul';
-    return empty($parts) ? "Color {$socket}" : implode('/', $parts);
+    if (($socket & 1) !== 0) $parts[] = t('socket_color_1');
+    if (($socket & 2) !== 0) $parts[] = t('socket_color_2');
+    if (($socket & 4) !== 0) $parts[] = t('socket_color_4');
+    if (($socket & 8) !== 0) $parts[] = t('socket_color_8');
+    return empty($parts) ? sprintf(t('color'), $socket) : implode('/', $parts);
 }
 
 function itemSpellTriggerName(int $trigger): string
 {
-    return [
-        0 => 'Usar',
-        1 => 'Al equipar',
-        2 => 'Probabilidad al golpear',
-        4 => 'Aprender hechizo',
-        5 => 'Usar sin demora',
-        6 => 'Aprender profesión',
-    ][$trigger] ?? "Trigger {$trigger}";
+    return in_array($trigger, [0,1,2,4,5,6], true) ? t("trigger_{$trigger}") : sprintf(t('trigger_generic'), $trigger);
 }
 
 function itemCooldownText(int $cooldown): string
@@ -345,7 +311,7 @@ function spellTemplateText(string $text, ?object $spell): string
 
     $text = preg_replace_callback('/\\$d\\b/', function () use ($spell): string {
         $durationIndex = (int)($spell->DurationIndex ?? 0);
-        return $durationIndex > 0 ? "duración {$durationIndex}" : '';
+        return $durationIndex > 0 ? sprintf(t('duration_index'), $durationIndex) : '';
     }, $text) ?? $text;
 
     $text = preg_replace('/\\$[a-zA-Z][0-9]?/', '', $text) ?? $text;
@@ -359,14 +325,14 @@ function renderItemTooltip(array $item, array $qColor, array $qName, string $slo
     $entry = (int)($item['entry'] ?? 0);
     $meta  = $item['meta'] ?? null;
     $dump  = is_array($item['dump'] ?? null) ? $item['dump'] : $item;
-    $name  = (string)($item['name'] ?? itemField($meta, 'name', "Item #{$entry}"));
+    $name  = (string)($item['name'] ?? itemField($meta, 'name', sprintf(t('item_placeholder_name'), $entry)));
     $q     = min(7, max(0, (int)($item['quality'] ?? itemField($meta, 'Quality', 1))));
     $color = $qColor[$q] ?? '#ffffff';
     $count = max(1, (int)($dump['count'] ?? 1));
 
     $html = '<div class="item-tooltip" role="tooltip">';
     $html .= '<div class="it-name" style="color:' . h($color) . '">' . h($name) . '</div>';
-    $html .= '<div class="it-line muted">' . h($qName[$q] ?? 'Calidad desconocida') . ($entry > 0 ? ' · Entry ' . $entry : '') . '</div>';
+    $html .= '<div class="it-line muted">' . h($qName[$q] ?? t('unknown_quality')) . ($entry > 0 ? ' · ' . t('label_entry') . ' ' . $entry : '') . '</div>';
 
     $itemLevel = (int)itemField($meta, 'ItemLevel', 0);
     $reqLevel  = (int)itemField($meta, 'RequiredLevel', 0);
@@ -377,9 +343,9 @@ function renderItemTooltip(array $item, array $qColor, array $qName, string $slo
         $bits = [];
         if ($slotLabel !== '') $bits[] = $slotLabel;
         if ($class >= 0 && $subclass >= 0) $bits[] = itemClassName($class, $subclass);
-        if ($itemLevel > 0) $bits[] = "Nivel de item {$itemLevel}";
-        if ($reqLevel > 0) $bits[] = "Requiere nivel {$reqLevel}";
-        if ($count > 1) $bits[] = "Cantidad {$count}";
+        if ($itemLevel > 0) $bits[] = sprintf(t('item_level'), $itemLevel);
+        if ($reqLevel > 0) $bits[] = sprintf(t('requires_level'), $reqLevel);
+        if ($count > 1) $bits[] = sprintf(t('quantity'), $count);
         $html .= '<div class="it-line">' . h(implode(' · ', $bits)) . '</div>';
     }
     if ($bonding !== '') $html .= '<div class="it-line muted">' . h($bonding) . '</div>';
@@ -389,19 +355,19 @@ function renderItemTooltip(array $item, array $qColor, array $qName, string $slo
         $max = (float)itemField($meta, "dmg_max{$i}", 0);
         if ($max > 0) {
             $type = itemDamageType((int)itemField($meta, "dmg_type{$i}", 0));
-            $html .= '<div class="it-line">' . h(rtrim(rtrim((string)$min, '0'), '.') . ' - ' . rtrim(rtrim((string)$max, '0'), '.') . " daño {$type}") . '</div>';
+            $html .= '<div class="it-line">' . h(rtrim(rtrim((string)$min, '0'), '.') . ' - ' . rtrim(rtrim((string)$max, '0'), '.') . ' ' . sprintf(t('damage_type'), $type)) . '</div>';
         }
     }
     $delay = (int)itemField($meta, 'delay', 0);
-    if ($delay > 0) $html .= '<div class="it-line">Velocidad ' . h(number_format($delay / 1000, 2, ',', '.')) . '</div>';
+    if ($delay > 0) $html .= '<div class="it-line">' . h(t('speed')) . ' ' . h(number_format($delay / 1000, 2, ',', '.')) . '</div>';
 
     $armor = (int)itemField($meta, 'armor', 0);
-    if ($armor > 0) $html .= '<div class="it-line">' . h($armor) . ' armadura</div>';
+    if ($armor > 0) $html .= '<div class="it-line">' . h($armor) . ' ' . h(t('armor')) . '</div>';
     $block = (int)itemField($meta, 'block', 0);
-    if ($block > 0) $html .= '<div class="it-line">' . h($block) . ' bloqueo</div>';
-    foreach (['holy_res' => 'Sagrado', 'fire_res' => 'Fuego', 'nature_res' => 'Naturaleza', 'frost_res' => 'Escarcha', 'shadow_res' => 'Sombras', 'arcane_res' => 'Arcano'] as $field => $label) {
+    if ($block > 0) $html .= '<div class="it-line">' . h($block) . ' ' . h(t('block')) . '</div>';
+    foreach (['holy_res' => 1, 'fire_res' => 2, 'nature_res' => 3, 'frost_res' => 4, 'shadow_res' => 5, 'arcane_res' => 6] as $field => $schoolId) {
         $value = (int)itemField($meta, $field, 0);
-        if ($value > 0) $html .= '<div class="it-line">+' . h($value) . ' resistencia a ' . h($label) . '</div>';
+        if ($value > 0) $html .= '<div class="it-line">+' . h($value) . ' ' . h(sprintf(t('resistance_to'), t("dmgschool_{$schoolId}"))) . '</div>';
     }
 
     for ($i = 1; $i <= 10; $i++) {
@@ -414,45 +380,45 @@ function renderItemTooltip(array $item, array $qColor, array $qName, string $slo
     }
 
     $maxDurability = (int)itemField($meta, 'MaxDurability', 0);
-    if ($maxDurability > 0) $html .= '<div class="it-line muted">Durabilidad ' . h($maxDurability) . ' / ' . h($maxDurability) . '</div>';
+    if ($maxDurability > 0) $html .= '<div class="it-line muted">' . h(t('durability')) . ' ' . h($maxDurability) . ' / ' . h($maxDurability) . '</div>';
     $itemSet = (int)itemField($meta, 'itemset', 0);
-    if ($itemSet > 0) $html .= '<div class="it-line muted">Set de objeto: ' . h($itemSet) . '</div>';
+    if ($itemSet > 0) $html .= '<div class="it-line muted">' . h(t('item_set')) . ': ' . h($itemSet) . '</div>';
 
     // ── Encantamiento ─────────────────────────────────────────────
     $ench = (int)($dump['ench'] ?? 0);
     if ($ench > 0) {
         $enchName = trim((string)($enchantMap[$ench] ?? ''));
-        $html .= '<div class="it-line enchant">Encantamiento: ' . h($enchName ?: "#{$ench}") . '</div>';
+        $html .= '<div class="it-line enchant">' . h(t('enchantment')) . ': ' . h($enchName ?: "#{$ench}") . '</div>';
     }
 
     // ── Sockets + joyas (estilo WoW) ──────────────────────────────
     $socketColorMap = [
-        1   => ['Meta',     '⬡', '#aaaaaa'],
-        2   => ['Rojo',     '◆', '#ff4444'],
-        4   => ['Amarillo', '◆', '#ffdd00'],
-        8   => ['Azul',     '◆', '#5599ff'],
-        16  => ['Naranja',  '◆', '#ff8800'],
-        32  => ['Morado',   '◆', '#aa44ee'],
-        64  => ['Verde',    '◆', '#44cc44'],
-        128 => ['Prism.',   '◆', '#e8e8ff'],
+        1   => [t('socket_color_1'),   '⬡', '#aaaaaa'],
+        2   => [t('socket_color_2'),   '◆', '#ff4444'],
+        4   => [t('socket_color_4'),   '◆', '#ffdd00'],
+        8   => [t('socket_color_8'),   '◆', '#5599ff'],
+        16  => [t('socket_color_16'),  '◆', '#ff8800'],
+        32  => [t('socket_color_32'),  '◆', '#aa44ee'],
+        64  => [t('socket_color_64'),  '◆', '#44cc44'],
+        128 => [t('socket_color_128'), '◆', '#e8e8ff'],
     ];
     $anySocket = false;
     for ($i = 1; $i <= 3; $i++) {
         $socketColor = (int)itemField($meta, "socketColor_{$i}", 0);
         if ($socketColor <= 0) continue;
         $anySocket = true;
-        $sc  = $socketColorMap[$socketColor] ?? ['Socket', '◆', '#888888'];
+        $sc  = $socketColorMap[$socketColor] ?? [t('socket_generic'), '◆', '#888888'];
         $gem = (int)($dump["gem{$i}"] ?? 0);
         if ($gem > 0) {
             $gemStat = trim((string)($enchantMap[$gem] ?? ''));
             $html .= '<div class="it-line socket-filled">'
                 . '<span class="sock-icon" style="color:' . h($sc[2]) . '">' . $sc[1] . '</span>'
-                . ' ' . h($gemStat ?: "Gema #{$gem}")
+                . ' ' . h($gemStat ?: sprintf(t('gem'), $gem))
                 . '</div>';
         } else {
             $html .= '<div class="it-line socket-empty">'
                 . '<span class="sock-icon" style="color:' . h($sc[2]) . '">' . $sc[1] . '</span>'
-                . ' Hueco ' . h($sc[0])
+                . ' ' . h(sprintf(t('socket_empty'), $sc[0]))
                 . '</div>';
         }
     }
@@ -464,9 +430,9 @@ function renderItemTooltip(array $item, array $qColor, array $qName, string $slo
                 $sc = (int)itemField($meta, "socketColor_{$j}", 0);
                 if ($sc > 0 && !(int)($dump["gem{$j}"] ?? 0)) { $allFilled = false; break; }
             }
-            $bonusName  = trim((string)($enchantMap[$socketBonus] ?? "Bonus #{$socketBonus}"));
+            $bonusName  = trim((string)($enchantMap[$socketBonus] ?? "#{$socketBonus}"));
             $bonusClass = $allFilled ? 'socket-bonus-on' : 'socket-bonus-off';
-            $html .= '<div class="it-line ' . $bonusClass . '">Bonus de socket: ' . h($bonusName) . '</div>';
+            $html .= '<div class="it-line ' . $bonusClass . '">' . h(t('socket_bonus')) . ': ' . h($bonusName) . '</div>';
         }
     }
 
@@ -484,15 +450,10 @@ function renderItemTooltip(array $item, array $qColor, array $qName, string $slo
         $spellAura = spellTemplateText(trim((string)($spellInfo->aura ?? '')), $spellInfo);
         $desc = $spellDesc !== '' ? $spellDesc : $spellAura;
         if ($desc === '') $desc = trim((string)($spellInfo->name ?? ''));
-        if ($desc === '') $desc = "Hechizo {$spellId}";
-        $triggerLabel = match ($trigger) {
-            0, 5    => 'Usar',
-            1       => 'Al equipar',
-            2       => 'Probabilidad al golpear',
-            default => 'Al equipar',
-        };
+        if ($desc === '') $desc = sprintf(t('spell'), $spellId);
+        $triggerLabel = in_array($trigger, [0,1,2,5], true) ? t("trigger_{$trigger}") : t('trigger_1');
         $line        = $triggerLabel . ': ' . $desc;
-        if ($cooldown !== '') $line .= ' (' . $cooldown . ' CD)';
+        if ($cooldown !== '') $line .= ' (' . $cooldown . ' ' . t('cooldown_abbr') . ')';
         $effectClass = ($trigger === 0 || $trigger === 5) ? 'effect-yellow' : 'effect-green';
         $html .= '<div class="it-line ' . $effectClass . '">' . h($line) . '</div>';
     }
@@ -501,8 +462,8 @@ function renderItemTooltip(array $item, array $qColor, array $qName, string $slo
     $maxCount  = (int)itemField($meta, 'maxcount', 0);
     if ($stackable > 1 || $maxCount > 0) {
         $bits = [];
-        if ($stackable > 1) $bits[] = "apilable {$stackable}";
-        if ($maxCount > 0) $bits[] = "máximo {$maxCount}";
+        if ($stackable > 1) $bits[] = sprintf(t('stackable'), $stackable);
+        if ($maxCount > 0) $bits[] = sprintf(t('maximum'), $maxCount);
         $html .= '<div class="it-line muted">' . h(implode(' · ', $bits)) . '</div>';
     }
 
@@ -517,7 +478,7 @@ function renderItemTooltip(array $item, array $qColor, array $qName, string $slo
         }
     }
     if (!empty($extra)) {
-        $html .= '<div class="it-sep"></div><div class="it-line muted">Chardump</div>';
+        $html .= '<div class="it-sep"></div><div class="it-line muted">' . h(t('label_chardump_raw')) . '</div>';
         foreach (array_slice($extra, 0, 10) as $line) $html .= '<div class="it-line tiny">' . $line . '</div>';
     }
 
@@ -530,7 +491,7 @@ function renderInventoryTooltip(array $dumpItem, ?object $meta, array $qColor, a
     $entry = (int)($dumpItem['entry'] ?? 0);
     return renderItemTooltip([
         'entry'   => $entry,
-        'name'    => $meta ? (string)$meta->name : "Item #{$entry}",
+        'name'    => $meta ? (string)$meta->name : sprintf(t('item_placeholder_name'), $entry),
         'quality' => $meta ? (int)$meta->Quality : 1,
         'dump'    => $dumpItem,
         'meta'    => $meta,
@@ -644,11 +605,11 @@ if (!empty($modelEquipments)) {
 }
 ?>
 <!DOCTYPE html>
-<html lang="<?= DEFAULT_LANG ?>">
+<html lang="<?= currentLang() ?>">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Vista previa del personaje — <?= t('site_title') ?></title>
+    <title><?= t('step2_preview_title') ?> — <?= t('site_title') ?></title>
     <link rel="stylesheet" href="../assets/css/style.css">
     <!-- jQuery requerido por el visor 3D de WoWHead -->
     <script src="https://code.jquery.com/jquery-3.7.1.min.js" crossorigin="anonymous"></script>
@@ -1223,10 +1184,11 @@ if (!empty($modelEquipments)) {
 <body class="paperdoll-page">
 
 <nav class="navbar">
-    <div class="nav-brand">⚔ Migrador AC</div>
+    <div class="nav-brand">⚔ <?= t('app_name') ?></div>
     <div class="nav-right">
+        <?php renderLangSwitcher(); ?>
         <span class="nav-user"><?= htmlspecialchars($user->name()) ?></span>
-        <a href="step1.php" class="btn btn-sm btn-outline">← Cambiar dump</a>
+        <a href="step1.php" class="btn btn-sm btn-outline">← <?= t('btn_change_dump') ?></a>
         <a href="../logout.php" class="btn btn-sm btn-outline"><?= t('logout') ?></a>
     </div>
 </nav>
@@ -1246,9 +1208,9 @@ if (!empty($modelEquipments)) {
 
     <!-- Cabecera del personaje -->
     <div class="char-header">
-        <div class="char-name-big"><?= htmlspecialchars($origName ?: ($basic['name'] ?? 'Personaje')) ?></div>
+        <div class="char-name-big"><?= htmlspecialchars($origName ?: ($basic['name'] ?? t('fallback_character'))) ?></div>
         <div class="char-sub">
-            Nivel <strong><?= (int)($basic['level'] ?? 0) ?></strong> &nbsp;·&nbsp;
+            <?= t('label_level') ?> <strong><?= (int)($basic['level'] ?? 0) ?></strong> &nbsp;·&nbsp;
             <?= htmlspecialchars($raceName) ?> &nbsp;·&nbsp;
             <?= htmlspecialchars($genderStr) ?>
         </div>
@@ -1265,7 +1227,7 @@ if (!empty($modelEquipments)) {
         <div class="cs-col left">
             <?php foreach ($leftCol as $db):
                 $s   = $paperSlots[$db] ?? null;
-                $lbl = $slotLabels[$db] ?? "Slot {$db}";
+                $lbl = isset($slotLabels[$db]) ? t($slotLabels[$db]) : sprintf(t('slot'), $db);
                 if (!$s): ?>
             <div class="cs-slot-wrap">
                 <div class="cs-slot empty"></div>
@@ -1295,7 +1257,7 @@ if (!empty($modelEquipments)) {
                 <!-- Spinner de carga -->
                 <div class="model-3d-loading" id="model-3d-loading">
                     <div class="m3d-spin"></div>
-                    <span>Cargando modelo…</span>
+                    <span><?= t('loading_model') ?></span>
                 </div>
 
             </div><!-- /model-3d-outer -->
@@ -1303,7 +1265,7 @@ if (!empty($modelEquipments)) {
             <!-- Link WoWHead vestidor -->
             <a href="<?= htmlspecialchars($dressingRoomUrl) ?>" target="_blank" rel="noopener"
                class="btn btn-sm btn-outline" style="font-size:0.7rem;padding:4px 12px;margin-top:8px">
-               Ver en WoWHead ↗
+               <?= t('view_wowhead') ?> ↗
             </a>
         </div>
 
@@ -1311,7 +1273,7 @@ if (!empty($modelEquipments)) {
         <div class="cs-col right">
             <?php foreach ($rightCol as $db):
                 $s   = $paperSlots[$db] ?? null;
-                $lbl = $slotLabels[$db] ?? "Slot {$db}";
+                $lbl = isset($slotLabels[$db]) ? t($slotLabels[$db]) : sprintf(t('slot'), $db);
                 if (!$s): ?>
             <div class="cs-slot-wrap">
                 <div class="cs-slot empty"></div>
@@ -1336,7 +1298,7 @@ if (!empty($modelEquipments)) {
     <div class="cs-weapon-bar">
         <?php foreach ($weaponRow as $db):
             $s   = $paperSlots[$db] ?? null;
-            $lbl = $slotLabels[$db] ?? "Slot {$db}";
+            $lbl = isset($slotLabels[$db]) ? t($slotLabels[$db]) : sprintf(t('slot'), $db);
         ?>
         <div class="cs-weapon-group">
             <?php if ($s): $q = min(7, max(0, $s['quality'])); ?>
@@ -1358,7 +1320,7 @@ if (!empty($modelEquipments)) {
     <?php if ($hasBags): ?>
     <div class="bag-bar">
         <?php foreach ($bagRow as $db):
-            $lbl = $slotLabels[$db] ?? "Bolsa";
+            $lbl = isset($slotLabels[$db]) ? t($slotLabels[$db]) : t('bag');
         ?>
         <div class="bag-group">
             <?php
@@ -1382,40 +1344,40 @@ if (!empty($modelEquipments)) {
     <!-- ── Stats (oro, honor, arena) ── -->
     <div class="stats-bar">
         <div class="stat-pill">
-            <span class="stat-pill-key">💰 Oro</span>
+            <span class="stat-pill-key">💰 <?= t('stat_gold') ?></span>
             <span class="stat-pill-val"><?= number_format($gold, 0, ',', '.') ?>g <?= $silver ?>s</span>
         </div>
         <?php if ($honor > 0): ?>
         <div class="stat-pill">
-            <span class="stat-pill-key">⚔ Honor</span>
+            <span class="stat-pill-key">⚔ <?= t('stat_honor') ?></span>
             <span class="stat-pill-val"><?= number_format($honor, 0, ',', '.') ?></span>
         </div>
         <?php endif; ?>
         <?php if ($arenapts > 0): ?>
         <div class="stat-pill">
-            <span class="stat-pill-key">🏆 Arena</span>
+            <span class="stat-pill-key">🏆 <?= t('stat_arena') ?></span>
             <span class="stat-pill-val"><?= number_format($arenapts, 0, ',', '.') ?></span>
         </div>
         <?php endif; ?>
         <div class="stat-pill">
-            <span class="stat-pill-key">📦 Mochila</span>
-            <span class="stat-pill-val"><?= count($bags) ?> items</span>
+            <span class="stat-pill-key">📦 <?= t('stat_backpack') ?></span>
+            <span class="stat-pill-val"><?= count($bags) ?> <?= t('unit_items') ?></span>
         </div>
         <div class="stat-pill">
-            <span class="stat-pill-key">🏦 Banco</span>
-            <span class="stat-pill-val"><?= count($bank) ?> items</span>
+            <span class="stat-pill-key">🏦 <?= t('stat_bank') ?></span>
+            <span class="stat-pill-val"><?= count($bank) ?> <?= t('unit_items') ?></span>
         </div>
         <div class="stat-pill">
-            <span class="stat-pill-key">✨ Spells</span>
+            <span class="stat-pill-key">✨ <?= t('stat_spells') ?></span>
             <span class="stat-pill-val"><?= count($dumpData['spells'] ?? []) ?></span>
         </div>
         <div class="stat-pill">
-            <span class="stat-pill-key">🔮 Talentos</span>
+            <span class="stat-pill-key">🔮 <?= t('stat_talents') ?></span>
             <span class="stat-pill-val"><?= count($dumpData['talents'] ?? []) ?></span>
         </div>
         <?php if (!empty($dumpData['glyphs'])): ?>
         <div class="stat-pill">
-            <span class="stat-pill-key">🌟 Glifos</span>
+            <span class="stat-pill-key">🌟 <?= t('stat_glyphs') ?></span>
             <span class="stat-pill-val"><?= count($dumpData['glyphs']) ?></span>
         </div>
         <?php endif; ?>
@@ -1431,23 +1393,23 @@ if (!empty($modelEquipments)) {
 
     <?php if (!empty($bags)): ?>
     <div class="inv-block">
-        <div class="inv-block-title">🎒 Mochila (<?= count($bags) ?> items)</div>
+        <div class="inv-block-title">🎒 <?= t('stat_backpack') ?> (<?= count($bags) ?> <?= t('unit_items') ?>)</div>
         <div class="inv-item-list">
         <?php foreach (array_slice($bags, 0, 8) as $bi):
             $e    = (int)($bi['entry'] ?? 0);
             $id   = $itemMap[$e] ?? null;
-            $name = $id ? $id->name : "Item #{$e}";
+            $name = $id ? $id->name : sprintf(t('item_placeholder_name'), $e);
             $q    = $id ? (int)$id->Quality : 1;
             $cnt  = (int)($bi['count'] ?? 1);
         ?>
             <div class="inv-item has-tooltip" tabindex="0" style="--qcolor:<?= $qColor[$q] ?? '#fff' ?>">
                 <span class="inv-item-name" style="color:<?= $qColor[$q] ?? '#fff' ?>"><?= htmlspecialchars($name) ?></span>
                 <span class="inv-item-count">×<?= $cnt ?></span>
-                <?= renderInventoryTooltip($bi, $id, $qColor, $qName, 'Mochila') ?>
+                <?= renderInventoryTooltip($bi, $id, $qColor, $qName, t('stat_backpack')) ?>
             </div>
         <?php endforeach; ?>
         <?php if (count($bags) > 8): ?>
-            <div class="inv-more">… y <?= count($bags) - 8 ?> más</div>
+            <div class="inv-more"><?= sprintf(t('inv_more'), count($bags) - 8) ?></div>
         <?php endif; ?>
         </div>
     </div>
@@ -1455,23 +1417,23 @@ if (!empty($modelEquipments)) {
 
     <?php if (!empty($bank)): ?>
     <div class="inv-block">
-        <div class="inv-block-title">🏦 Banco (<?= count($bank) ?> items)</div>
+        <div class="inv-block-title">🏦 <?= t('stat_bank') ?> (<?= count($bank) ?> <?= t('unit_items') ?>)</div>
         <div class="inv-item-list">
         <?php foreach (array_slice($bank, 0, 8) as $bi):
             $e    = (int)($bi['entry'] ?? 0);
             $id   = $itemMap[$e] ?? null;
-            $name = $id ? $id->name : "Item #{$e}";
+            $name = $id ? $id->name : sprintf(t('item_placeholder_name'), $e);
             $q    = $id ? (int)$id->Quality : 1;
             $cnt  = (int)($bi['count'] ?? 1);
         ?>
             <div class="inv-item has-tooltip" tabindex="0" style="--qcolor:<?= $qColor[$q] ?? '#fff' ?>">
                 <span class="inv-item-name" style="color:<?= $qColor[$q] ?? '#fff' ?>"><?= htmlspecialchars($name) ?></span>
                 <span class="inv-item-count">×<?= $cnt ?></span>
-                <?= renderInventoryTooltip($bi, $id, $qColor, $qName, 'Banco') ?>
+                <?= renderInventoryTooltip($bi, $id, $qColor, $qName, t('stat_bank')) ?>
             </div>
         <?php endforeach; ?>
         <?php if (count($bank) > 8): ?>
-            <div class="inv-more">… y <?= count($bank) - 8 ?> más</div>
+            <div class="inv-more"><?= sprintf(t('inv_more'), count($bank) - 8) ?></div>
         <?php endif; ?>
         </div>
     </div>
@@ -1484,11 +1446,9 @@ if (!empty($modelEquipments)) {
      FORMULARIO DE CONFIRMACIÓN
 ════════════════════════════════════════════════════════════ -->
 <div class="confirm-section">
-    <div class="confirm-title">📋 Confirmar transferencia</div>
+    <div class="confirm-title">📋 <?= t('confirm_transfer') ?></div>
     <p class="text-muted" style="font-size:.85rem;margin-bottom:1rem">
-        Revisa que todo esté correcto en el panel de arriba.
-        Puedes cambiar el nombre si ya está en uso en este servidor.
-        Al confirmar, la transferencia quedará <strong>pendiente de aprobación GM</strong>.
+        <?= t('confirm_transfer_help') ?>
     </p>
 
     <?php if ($error): ?>
@@ -1498,17 +1458,17 @@ if (!empty($modelEquipments)) {
     <form method="POST">
         <input type="hidden" name="token" value="<?= $token ?>">
         <div class="form-group">
-            <label for="char_name">Nombre del personaje en el servidor</label>
+            <label for="char_name"><?= t('char_name_server') ?></label>
             <input type="text" name="char_name" id="char_name"
                    value="<?= htmlspecialchars($origName) ?>"
                    minlength="2" maxlength="12"
                    pattern="[a-zA-Z]{2,12}"
-                   placeholder="Ej: Traspaso"
+                   placeholder="<?= t('char_name_placeholder') ?>"
                    required>
-            <small class="hint">Solo letras, 2-12 caracteres.</small>
+            <small class="hint"><?= t('char_name_hint_short') ?></small>
         </div>
         <button type="submit" class="btn-confirm">
-            ✅ Confirmar y enviar solicitud al GM
+            ✅ <?= t('btn_confirm_submit_gm') ?>
         </button>
     </form>
 </div>
@@ -1517,7 +1477,7 @@ if (!empty($modelEquipments)) {
 <!-- Dump no es JSON — formulario simple -->
 <div class="card">
     <div class="card-body">
-        <div class="alert alert-error">El dump no tiene un formato reconocible. <a href="step1.php">Vuelve al paso 1</a>.</div>
+        <div class="alert alert-error"><?= t('unrecognized_dump') ?> <a href="step1.php"><?= t('back_step1') ?></a>.</div>
     </div>
 </div>
 <?php endif; ?>
@@ -1581,6 +1541,17 @@ if (!empty($modelEquipments)) {
     };
     _patchClearColor(WebGLRenderingContext.prototype);
     if (window.WebGL2RenderingContext) _patchClearColor(WebGL2RenderingContext.prototype);
+
+    // ── Textos localizados del estado de carga del viewer ────────────────────
+    const I18N = <?= json_encode([
+        'loading_viewer'  => t('js_loading_viewer'),
+        'viewer_ok_direct' => t('js_viewer_ok_direct'),
+        'viewer_via_proxy' => t('js_viewer_via_proxy'),
+        'viewer_ok_proxy'  => t('js_viewer_ok_proxy'),
+        'loading_library'  => t('js_loading_library'),
+        'rendering'        => t('js_rendering'),
+        'error_prefix'     => t('js_error_prefix'),
+    ], JSON_UNESCAPED_UNICODE) ?>;
 
     // ── Variables globales del viewer ────────────────────────────────────────
     // CONTENT_PATH necesario para que ZamModelViewer cargue los assets del modelo
@@ -1683,24 +1654,24 @@ if (!empty($modelEquipments)) {
 
     try {
         // 3. viewer.min.js — primero directo desde zamimg, luego vía proxy
-        log('Cargando viewer…');
+        log(I18N.loading_viewer);
         const viewerDirect = 'https://wow.zamimg.com/modelviewer/live/viewer/viewer.min.js';
         const viewerProxy  = <?= json_encode($model3dViewer) ?>;
         try {
             await loadScript(viewerDirect, 12000);
-            log('Viewer OK (directo)');
+            log(I18N.viewer_ok_direct);
         } catch {
-            log('Viewer vía proxy…');
+            log(I18N.viewer_via_proxy);
             await loadScript(viewerProxy, 20000);
-            log('Viewer OK (proxy)');
+            log(I18N.viewer_ok_proxy);
         }
 
         // 4. wow-model-viewer desde esm.sh (solo necesitamos generateModels)
-        log('Cargando librería…');
+        log(I18N.loading_library);
         const { generateModels } = await import('https://esm.sh/wow-model-viewer@1.5.3');
 
         // 5. Renderizar — items ya incluidos en charData.items (convertidos en PHP)
-        log('Renderizando…');
+        log(I18N.rendering);
         const model = await generateModels(1, '#model-3d', charData);
 
         if (model && typeof model.updateItemViewer === 'function' && Array.isArray(charData.items)) {
@@ -1721,7 +1692,7 @@ if (!empty($modelEquipments)) {
         elLoading.style.display = 'none';
 
     } catch (err) {
-        log('Error: ' + (err.message || err));
+        log(I18N.error_prefix + (err.message || err));
         console.error('[3D Viewer]', err);
     }
 
@@ -1731,3 +1702,7 @@ if (!empty($modelEquipments)) {
 <script src="../assets/js/app.js"></script>
 </body>
 </html>
+
+
+
+

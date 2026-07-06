@@ -9,7 +9,10 @@ if ($user->isLoggedIn()) {
 }
 
 $error = '';
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && Input::exists()) {
+$lockedMinutes = RateLimiter::isBlocked();
+if ($lockedMinutes !== null) {
+    $error = t('login_rate_limited') . " ({$lockedMinutes} min)";
+} elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && Input::exists()) {
     if (!Token::check(Input::get('token'))) {
         $error = t('token_error');
     } else {
@@ -22,6 +25,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && Input::exists()) {
         } else {
             $u = new User();
             if ($u->login(Input::get('username'), Input::get('password'))) {
+                RateLimiter::clear();
                 Token::invalidate();
                 $base = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' ? 'https' : 'http')
                       . '://' . $_SERVER['HTTP_HOST']
@@ -32,10 +36,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && Input::exists()) {
                 echo "<meta http-equiv=\"refresh\" content=\"0;url={$dest}\">";
                 echo '</head><body>';
                 echo "<script>window.location.href=\"{$dest}\";</script>";
-                echo "<p>Redirigiendo... <a href=\"{$dest}\">Clic aquí si no redirige</a></p>";
+                echo "<p>" . t('redirecting') . " <a href=\"{$dest}\">" . t('redirect_link') . "</a></p>";
                 echo '</body></html>';
                 exit;
             } else {
+                RateLimiter::recordFailure();
                 $error = t('login_error');
             }
         }
@@ -45,7 +50,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && Input::exists()) {
 $token = Token::generate();
 ?>
 <!DOCTYPE html>
-<html lang="<?= DEFAULT_LANG ?>">
+<html lang="<?= currentLang() ?>">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -54,9 +59,10 @@ $token = Token::generate();
 </head>
 <body class="login-body">
 <div class="login-box">
+    <div class="login-lang-bar"><?php renderLangSwitcher(); ?></div>
     <div class="login-logo">
         <div class="logo-icon">⚔</div>
-        <h1>Migrador AC</h1>
+        <h1><?= t('app_name') ?></h1>
         <p class="subtitle">AzerothCore WotLK 3.3.5a</p>
     </div>
 
@@ -64,6 +70,7 @@ $token = Token::generate();
         <div class="alert alert-error"><?= htmlspecialchars($error) ?></div>
     <?php endif; ?>
 
+    <?php if ($lockedMinutes === null): ?>
     <form method="POST" action="index.php" autocomplete="on">
         <input type="hidden" name="token" value="<?= htmlspecialchars($token) ?>">
         <div class="form-group">
@@ -82,7 +89,12 @@ $token = Token::generate();
             🔐 <?= t('login_btn') ?>
         </button>
     </form>
-    <p class="login-footer">Usa las mismas credenciales del juego.</p>
+    <?php endif; ?>
+    <p class="login-footer"><?= t('login_footer') ?></p>
 </div>
 </body>
 </html>
+
+
+
+

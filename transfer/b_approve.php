@@ -30,7 +30,7 @@ $transferId = (int) Input::get('id');
 $realmId    = (int) Input::get('realm');
 
 if ($transferId <= 0 || $realmId <= 0) {
-    Session::flash('error', 'Parámetros inválidos.');
+    Session::flash('error', t('invalid_params'));
     header('Location: ../dashboard.php');
     exit;
 }
@@ -48,7 +48,7 @@ $row = DB::auth()->row(
     [$transferId]
 );
 if (!$row) {
-    Session::flash('error', 'Transferencia no encontrada.');
+    Session::flash('error', t('transfer_not_found'));
     header('Location: ../dashboard.php');
     exit;
 }
@@ -69,7 +69,7 @@ if ($existingGuid > 0) {
 
 // Dump no disponible → error
 if (empty($dumpData)) {
-    Session::flash('error', 'El dump no está disponible para importar. Pide al jugador que lo reenvíe.');
+    Session::flash('error', t('dump_unavailable'));
     header('Location: ../dashboard.php');
     exit;
 }
@@ -78,7 +78,7 @@ if (empty($dumpData)) {
 $guid = applyCharacterDump($realmId, $dumpData, $targetAccountId);
 
 if ($guid <= 0) {
-    Session::flash('error', t('dump_apply_error') . " — Revisa los logs del servidor.");
+    Session::flash('error', t('dump_apply_error') . ' — ' . t('check_server_logs'));
     header('Location: ../dashboard.php');
     exit;
 }

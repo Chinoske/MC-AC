@@ -89,4 +89,14 @@ CREATE OR REPLACE VIEW `v_transfer_summary` AS
     LEFT JOIN `account` a ON a.id = t.cAccount
     ORDER BY t.id DESC;
 
+-- ── Rate limiting de login (RateLimiter.php) ──────────────────
+CREATE TABLE IF NOT EXISTS `migrador_login_attempts` (
+    `id`           INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `ip_address`   VARCHAR(45)  NOT NULL COMMENT 'IPv4 o IPv6 del intento fallido',
+    `attempted_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    KEY `idx_ip_time` (`ip_address`, `attempted_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  COMMENT='Intentos de login fallidos en la web, para bloqueo temporal por IP';
+
 SELECT 'Migrador instalado correctamente en acore_auth.' AS resultado;
