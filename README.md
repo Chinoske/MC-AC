@@ -127,6 +127,49 @@ Jugador                    Web                      GM
 
 ---
 
+## ✅ Qué hace la importación (al aprobar una transferencia)
+
+Además de crear el personaje con su equipo/bolsas/banco/spells/reputaciones tal
+cual vienen en el dump, `CharacterImporter` completa automáticamente lo que un
+personaje insertado directo en la DB nunca recibe (por saltarse
+`Player::Create()`):
+
+- **Barra de acciones** — se rellena con el layout por defecto de su
+  raza/clase (`playercreateinfo_action`), en vez de quedar vacía.
+- **Skills de arma/armadura/defensa al máximo (400)** — leídos de
+  `playercreateinfo_skills` (misma tabla que usa el core), sin adivinar
+  ningún id a mano.
+- **Plate Mail para Guerrero/Paladín** — caso especial: esa proficiency no
+  está en `playercreateinfo_skills` para esas 2 clases (se consigue más
+  adelante en el juego, no "de fábrica"); Death Knight sí la tiene de
+  fábrica y no necesita el caso especial.
+- **Profesiones a 400** — si el dump trae alguna (Alquimia, Herrería, etc.),
+  se sube a su tope en vez de dejar el valor original.
+- **Talentos reseteados con todos los puntos libres** — se marca
+  `AT_LOGIN_RESET_TALENTS`, que el propio core resetea automáticamente en
+  el primer login (no vale la pena insertar un build de talentos a mano:
+  no hay forma confiable de validar esos ids por SQL en una instalación
+  típica, y uno inválido puede tirar abajo el worldserver).
+- **`exploredZones`/`knownTitles` con el formato correcto** — el core
+  exige exactamente 128 y 6 enteros respectivamente o descarta el campo
+  entero como inválido; un `NULL` directo generaba warnings en cada login.
+- **`cinematic = 1`** — no dispara el video de introducción de la raza.
+- **Reconocimiento inmediato por el servidor** — se llama `.cache refresh
+  <nombre>` por SOAP apenas termina el import, para que el personaje no
+  aparezca como "entidad desconocida" en chat/`/who`/nameplates hasta que
+  alguien reinicie el worldserver (el core solo actualiza ese caché en
+  memoria en las creaciones normales de personaje).
+
+> **Requiere `SOAP.Enabled = 1`** en `worldserver.conf` para el refresco de
+> caché, el reenvío de items por correo y el reset de talentos por comando.
+
+> **Multi-realm**: el chequeo de GM (`User::gmLevel()` / `getGMLevel()`)
+> reconoce el `RealmID` de cada realm definido en `REALMS` (config.php), no
+> solo el 1 — una cuenta GM asignada únicamente a otro realm ya no queda
+> bloqueada del panel de aprobación.
+
+---
+
 ## 📁 Estructura del proyecto
 
 ```
