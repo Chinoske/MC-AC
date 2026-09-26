@@ -15,10 +15,27 @@ header('X-Content-Type-Options: nosniff');
 header('X-XSS-Protection: 1; mode=block');
 header('Referrer-Policy: strict-origin-when-cross-origin');
 
+// config.php ya no viene en el repo (lleva credenciales), asi que en una
+// instalacion nueva falta. Sin esto, cada entry point moria con un
+// "Failed opening required config.php" sin decir que hacer.
+if (!is_file(__DIR__ . '/config.php')) {
+    http_response_code(500);
+    header('Content-Type: text/plain; charset=utf-8');
+    exit("Falta config.php
+
+"
+       . "Copia la plantilla y edita tus credenciales:
+"
+       . "    copy config.example.php config.php
+");
+}
+
 $uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH) ?? '/';
 
 // ── Bloquear acceso directo a storage/ (chardumps, cachés, sesiones) ──
-if (preg_match('#^/storage(/|$)#', $uri)) {
+// El regex va con /i: en Windows el filesystem no distingue mayusculas y
+// GET /Storage/... servia el archivo igualmente.
+if (preg_match('#^/storage(/|$)#i', $uri)) {
     http_response_code(403);
     exit('Forbidden');
 }

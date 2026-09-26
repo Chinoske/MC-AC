@@ -24,7 +24,10 @@ if ($lockedMinutes !== null) {
             $error = $v->firstError();
         } else {
             $u = new User();
-            if ($u->login(Input::get('username'), Input::get('password'))) {
+            // getRaw: sanear la contraseña la cambiaba (htmlspecialchars +
+            // strip_tags), asi que cualquiera con & < > " ' o espacios al borde
+            // no podia entrar aunque funcionara en el juego.
+            if ($u->login(Input::getRaw('username'), Input::getRaw('password'))) {
                 RateLimiter::clear();
                 Token::invalidate();
                 $base = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' ? 'https' : 'http')

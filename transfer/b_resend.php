@@ -71,7 +71,7 @@ try {
     $itemArray = [];
     foreach ($items as $item) {
         $entry = (int) $item->item_entry;
-        if (!isBlockedItem($entry)) {
+        if (!in_array($entry, BLOCKED_ITEMS, true)) {
             $itemArray[$entry] = sanitizeItemCount((int) $item->count);
         }
     }

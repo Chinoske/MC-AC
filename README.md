@@ -16,7 +16,8 @@ Versión actualizada y modernizada desde el repositorio original:
    ```
    mysql -u acore -p acore_auth < sql/install.sql
    ```
-2. Edita `config.php` con tus credenciales de base de datos y SOAP.
+2. Copia `config.example.php` a `config.php` y edita tus credenciales de base de
+   datos y SOAP. `config.php` está en `.gitignore` para que no acabe en el repo.
 3. Doble clic en **`Iniciar.bat`** — levanta el servidor y abre el navegador automáticamente en `http://localhost:8080`.
 4. Para detenerlo: cierra la ventana de consola o ejecuta **`Detener.bat`**.
 
@@ -50,7 +51,11 @@ Crea:
 
 ### 2. Configuración
 
-Edita **`config.php`** con tus datos:
+Copia la plantilla y edita **tu** copia:
+
+```bash
+cp config.example.php config.php
+```
 
 ```php
 define('DB_AUTH_HOST', '127.0.0.1');
@@ -71,7 +76,34 @@ define('REALMS', [
 ]);
 ```
 
-### 3. Worldserver — Habilitar SOAP
+### 3. Importa con el worldserver apagado
+
+> ⚠ **La aprobación está bloqueada mientras el worldserver esté encendido.**
+
+`ObjectMgr::SetHighestGuids()` se ejecuta una sola vez al arrancar: el core lee
+`MAX(guid)` de `characters` e `item_instance` y a partir de ahí reparte GUIDs desde
+memoria. El import escribe directo en la DB con `MAX(guid)+1`, así que con el
+servidor arriba se queda con GUIDs que el core ya tiene reservados, y el siguiente
+personaje creado en el juego (o cada item looteado) choca contra la clave primaria.
+Lo mismo con `mail.id`, que tampoco es `AUTO_INCREMENT`.
+
+Por eso el flujo es:
+
+1. Para el worldserver.
+2. Aprueba las transferencias pendientes en el panel GM.
+3. Arranca el worldserver. Al arrancar lee el caché de personajes de la DB, así que
+   el `.cache refresh` por SOAP ya no hace falta.
+
+Mientras detecte el worldserver escuchando, el panel muestra un aviso y deja el
+botón **Aprobar** deshabilitado; `b_approve.php` lo rechaza igualmente si alguien
+manda el POST a mano. Si necesitas importar con el servidor arriba y asumes el
+riesgo, en `config.php`:
+
+```php
+define('ALLOW_IMPORT_WHILE_ONLINE', true);
+```
+
+### 4. Worldserver — Habilitar SOAP
 
 En `worldserver.conf`:
 
@@ -81,7 +113,7 @@ SOAP.IP       = 127.0.0.1
 SOAP.Port     = 7878
 ```
 
-### 4. Pre-cachear íconos (recomendado)
+### 5. Pre-cachear íconos (recomendado)
 
 Primero asegúrate de que `DBC_PATH` en `config.php` apunte a la carpeta que contiene `ItemDisplayInfo.dbc`:
 
@@ -95,7 +127,8 @@ Luego ejecuta una sola vez:
 php api/precache_icons.php
 ```
 
-O desde el navegador: `http://localhost:8080/api/precache_icons.php`
+O desde el navegador, **con una sesión de GM abierta**:
+`http://localhost:8080/api/precache_icons.php`
 
 Procesa los ~46 000 items de `item_template` en ~75 s y genera `storage/icon_cache/`.  
 Para forzar reconstrucción: `?reset=1`
@@ -106,8 +139,10 @@ Para forzar reconstrucción: `?reset=1`
 
 ## 🔑 Cómo iniciar sesión
 
-Los jugadores usan las **mismas credenciales del juego** (cuenta de AzerothCore).  
-El hash de contraseña es `SHA1(USUARIO:CONTRASEÑA)` en mayúsculas — compatible directamente con `acore_auth.account`.
+Los jugadores usan las **mismas credenciales del juego** (cuenta de AzerothCore).
+La verificación es **SRP6** contra `acore_auth.account` (`salt` + `verifier`), igual
+que hace el propio authserver en las revisiones actuales de AzerothCore. Requiere la
+extensión `gmp`, ya incluida en el PHP de `php/`.
 
 ---
 
@@ -146,14 +181,24 @@ personaje insertado directo en la DB nunca recibe (por saltarse
   fábrica y no necesita el caso especial.
 - **Profesiones a 400** — si el dump trae alguna (Alquimia, Herrería, etc.),
   se sube a su tope en vez de dejar el valor original.
-- **Talentos reseteados con todos los puntos libres** — se marca
-  `AT_LOGIN_RESET_TALENTS`, que el propio core resetea automáticamente en
-  el primer login (no vale la pena insertar un build de talentos a mano:
-  no hay forma confiable de validar esos ids por SQL en una instalación
-  típica, y uno inválido puede tirar abajo el worldserver).
+- **Talentos reseteados con todos los puntos libres** — `at_login` se deja en 5
+  (`AT_LOGIN_RENAME | AT_LOGIN_RESET_TALENTS`), así que el core los resetea en el
+  primer login y además pide confirmar el nombre. No vale la pena insertar un build
+  a mano: no hay forma confiable de validar esos ids por SQL en una instalación
+  típica, y uno inválido puede tirar abajo el worldserver.
 - **`exploredZones`/`knownTitles` con el formato correcto** — el core
   exige exactamente 128 y 6 enteros respectivamente o descarta el campo
   entero como inválido; un `NULL` directo generaba warnings en cada login.
+- **Items con su durabilidad completa** — `item_instance.durability` se rellena con
+  el `MaxDurability` de `item_template`. `Item::LoadFromDB` solo corrige la
+  durabilidad si supera el máximo, así que un 0 se quedaba en 0 y el personaje
+  entraba con todo el equipo roto.
+- **Gemas en los sockets correctos** — slots 2, 3 y 4 de `enchantments`
+  (`SOCK_ENCHANTMENT_SLOT` en `Item.h`). El slot 1 es el encantamiento temporal, y
+  usarlo desplazaba las tres gemas dejando el último socket vacío.
+- **Correos troceados a 12 adjuntos** — el límite del cliente
+  (`MAX_MAIL_ITEMS`). Además `mail.id` se genera a mano: no es `AUTO_INCREMENT`, así
+  que `lastInsertId()` devolvía 0 y el segundo correo chocaba con la clave primaria.
 - **`cinematic = 1`** — no dispara el video de introducción de la raza.
 - **Reconocimiento inmediato por el servidor** — se llama `.cache refresh
   <nombre>` por SOAP apenas termina el import, para que el personaje no
@@ -180,7 +225,8 @@ Migrador/
 ├── router.php                  ← Headers de seguridad + bloqueo storage//.sql,
 │                                  ya que `php -S` no aplica `.htaccess`
 ├── set_lang.php                ← Cambia el idioma activo (guardado en sesión)
-├── config.php                  ← Configuración principal (edita esto)
+├── config.example.php          ← Plantilla: cópiala a config.php
+├── config.php                  ← Tu configuración (gitignored)
 ├── index.php                   ← Login
 ├── dashboard.php               ← Panel jugador / GM
 ├── logout.php                  ← Cerrar sesión
@@ -275,6 +321,8 @@ entry ──> api/icon.php ──> storage/icon_cache/<entry>.txt ──> CDN Wo
 | Errores | `die("SHIT HAPPENS")` | **Flash messages + logs PHP** |
 | Paso 2 | Formulario de nombre | **Character Sheet visual** con íconos, calidades y stats |
 | Íconos | Ninguno | **DBC local** → caché de archivo → CDN WoWHead |
+| Formato de dump | SQL ejecutado con `exec()` | **JSON validado campo a campo** |
+| GUIDs | `MAX(guid)+1` a ciegas | **`FOR UPDATE`** + import bloqueado con el server arriba |
 
 ---
 
@@ -293,7 +341,18 @@ entry ──> api/icon.php ──> storage/icon_cache/<entry>.txt ──> CDN Wo
   `X-Content-Type-Options`, `X-XSS-Protection`, `Referrer-Policy`) y bloquea con
   403 el acceso directo a `/storage/` y a archivos `.sql`, `.log`, `.bak`, `.env`,
   `.ini` — protecciones que antes solo existían en `.htaccess` y nunca se
-  aplicaban en la práctica.
+  aplicaban en la práctica. El patrón de `/storage/` va con `/i`: en Windows el
+  filesystem no distingue mayúsculas, así que `GET /Storage/…` servía el archivo.
+- **Aprobación bloqueada con el worldserver encendido** (`ALLOW_IMPORT_WHILE_ONLINE`)
+  — el chequeo está en `b_approve.php`, no solo en la UI.
+- **Solo se aceptan dumps JSON (chardump v2)**, que `CharacterImporter` reconstruye
+  campo a campo. El formato v1 pasaba el dump del jugador a `PDO::exec()` troceado
+  por `;`, y el "cifrado" del addon es un base64 invertido: cualquiera podía
+  fabricar un dump con statements extra (por ejemplo un `INSERT` en
+  `account_access`) y le bastaba con que un GM pulsara Aprobar.
+- **`api/precache_icons.php` exige sesión de GM** desde el navegador. Sin eso,
+  cualquiera podía lanzar ~46 000 lookups y otras tantas escrituras por request, y
+  `?reset=1` borraba la caché para que no hubiera atajo.
 - **Rate limiting de login** (`classes/RateLimiter.php`) — bloquea una IP
   durante 15 minutos tras 5 intentos fallidos en una ventana de 15 minutos
   (tabla `migrador_login_attempts` en `acore_auth`). El cálculo del tiempo

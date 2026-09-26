@@ -13,6 +13,21 @@ if (!$user->isLoggedIn()) {
 }
 
 $isGM      = $user->isGM();
+
+// ObjectMgr::SetHighestGuids() se ejecuta una sola vez al arrancar y los
+// generadores de GUID viven en memoria desde entonces. El import escribe
+// MAX(guid)+1 directo en la DB, asi que con el worldserver arriba se queda con
+// GUIDs que el core ya tiene reservados: el siguiente personaje creado en el
+// juego, y cada item looteado, chocan contra la PK. b_approve.php lo bloquea;
+// aqui solo evitamos ofrecer un boton que va a fallar.
+$allowOnline  = defined('ALLOW_IMPORT_WHILE_ONLINE') && ALLOW_IMPORT_WHILE_ONLINE;
+$realmOnline  = [];
+if ($isGM && !$allowOnline) {
+    foreach (array_keys(REALMS) as $rid) {
+        $realmOnline[$rid] = Soap::isOnline($rid);
+    }
+}
+$onlineRealms = array_map('getRealmName', array_keys(array_filter($realmOnline)));
 $accountId = $user->id();
 $transfers = getAccountTransfers($accountId, $isGM);
 $realmList = getRealmList();
@@ -49,6 +64,12 @@ $statusIcons   = ['⏳','✅','❌','🚫','📨'];
 </nav>
 
 <main class="container">
+
+    <?php if ($isGM && !empty($onlineRealms)): ?>
+        <div class="alert alert-error">
+            ⚠ <?= htmlspecialchars(sprintf(t('warn_worldserver_online'), implode(', ', $onlineRealms))) ?>
+        </div>
+    <?php endif; ?>
 
     <!-- ── Alertas flash ──────────────────────────────────── -->
     <?php if ($flash): ?>
@@ -139,15 +160,23 @@ $statusIcons   = ['⏳','✅','❌','🚫','📨'];
                     <!-- ── Acciones ──────────────────────── -->
                     <td class="actions">
                     <?php if ($isGM && $st === 0): ?>
+                        <?php $blocked = !empty($realmOnline[(int) $tr->cRealmID]); ?>
                         <!-- GM: Aprobar — importa el personaje ahora -->
+                        <?php if ($blocked): ?>
+                            <button class="btn btn-xs btn-success" disabled
+                                    title="<?= htmlspecialchars(sprintf(t('import_blocked_online'), getRealmName((int) $tr->cRealmID)), ENT_QUOTES) ?>">
+                                ✅ <?= t('btn_approve') ?>
+                            </button>
+                        <?php else: ?>
                         <form method="POST" action="transfer/b_approve.php"
                               class="inline-form"
-                              onsubmit="return confirm('<?= t('confirm_approve') ?>')">
+                              onsubmit="return confirm(<?= jsText('confirm_approve') ?>)">
                             <input type="hidden" name="token"  value="<?= Token::generate() ?>">
                             <input type="hidden" name="id"     value="<?= (int) $tr->id ?>">
                             <input type="hidden" name="realm"  value="<?= (int) $tr->cRealmID ?>">
                             <button class="btn btn-xs btn-success">✅ <?= t('btn_approve') ?></button>
                         </form>
+                        <?php endif; ?>
 
                         <!-- GM: Denegar (con motivo) -->
                         <form method="POST" action="transfer/b_deny.php"
@@ -167,7 +196,7 @@ $statusIcons   = ['⏳','✅','❌','🚫','📨'];
                         <!-- GM: Reenviar items (solo si ya fue importado) -->
                         <form method="POST" action="transfer/b_resend.php"
                               class="inline-form"
-                              onsubmit="return confirm('<?= t('confirm_resend') ?>')">
+                              onsubmit="return confirm(<?= jsText('confirm_resend') ?>)">
                             <input type="hidden" name="token"  value="<?= Token::generate() ?>">
                             <input type="hidden" name="id"     value="<?= (int) $tr->id ?>">
                             <input type="hidden" name="realm"  value="<?= (int) $tr->cRealmID ?>">
@@ -180,7 +209,7 @@ $statusIcons   = ['⏳','✅','❌','🚫','📨'];
                         <!-- Jugador: Cancelar -->
                         <form method="POST" action="transfer/b_cancel.php"
                               class="inline-form"
-                              onsubmit="return confirm('<?= t('confirm_cancel') ?>')">
+                              onsubmit="return confirm(<?= jsText('confirm_cancel') ?>)">
                             <input type="hidden" name="token"  value="<?= Token::generate() ?>">
                             <input type="hidden" name="id"     value="<?= (int) $tr->id ?>">
                             <input type="hidden" name="realm"  value="<?= (int) $tr->cRealmID ?>">
@@ -207,7 +236,7 @@ $statusIcons   = ['⏳','✅','❌','🚫','📨'];
         <h3>❌ <?= t('btn_deny') ?></h3>
         <p><?= t('deny_reason') ?></p>
         <textarea id="denyReasonText" rows="3" maxlength="255"
-                  placeholder="<?= t('deny_reason_placeholder') ?>"></textarea>
+                  placeholder="<?= htmlspecialchars(t('deny_reason_placeholder'), ENT_QUOTES) ?>"></textarea>
         <div class="modal-actions">
             <button class="btn btn-danger" id="denyConfirmBtn"><?= t('btn_confirm') ?></button>
             <button class="btn btn-outline" onclick="closeDenyModal()"><?= t('btn_cancel_plain') ?></button>

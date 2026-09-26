@@ -13,6 +13,21 @@
 $isCli = (PHP_SAPI === 'cli');
 
 if (!$isCli) {
+    // Sin esto cualquiera podia lanzar 46k lookups + 46k escrituras por
+    // request, y ?reset=1 borraba la cache para que no hubiera atajo.
+    require_once dirname(__DIR__) . '/config.php';
+    $caller = new User();
+    if (!$caller->isLoggedIn() || !$caller->isGM()) {
+        http_response_code(403);
+        header('Content-Type: text/plain; charset=utf-8');
+        exit("403 - solo un GM puede lanzar el pre-cacheo desde el navegador.
+"
+           . "Por consola: php api/precache_icons.php
+");
+    }
+}
+
+if (!$isCli) {
     // Desde browser: output con flush para ver progreso en tiempo real
     header('Content-Type: text/plain; charset=utf-8');
     header('X-Accel-Buffering: no');
