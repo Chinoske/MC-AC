@@ -101,11 +101,7 @@ CREATE TABLE IF NOT EXISTS `migrador_login_attempts` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   COMMENT='Intentos de login fallidos en la web, para bloqueo temporal por IP';
 
--- Los intentos de login de IPs que nunca aciertan no los borra nadie
--- (RateLimiter::clear solo limpia la IP que entra), asi que conviene purgar.
-CREATE EVENT IF NOT EXISTS `ev_migrador_purge_login_attempts`
-    ON SCHEDULE EVERY 1 DAY
-    DO DELETE FROM `migrador_login_attempts`
-        WHERE `attempted_at` < (NOW() - INTERVAL 1 DAY);
+-- Los intentos viejos los purga RateLimiter::purgeOld() desde PHP. Con un
+-- EVENT no bastaria: el event_scheduler viene apagado en MariaDB.
 
 SELECT 'Migrador instalado correctamente.' AS resultado;

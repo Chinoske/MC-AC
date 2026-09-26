@@ -199,8 +199,6 @@ $statusIcons   = ['⏳','✅','❌','🚫','📨'];
                               onsubmit="return confirm(<?= jsText('confirm_resend') ?>)">
                             <input type="hidden" name="token"  value="<?= Token::generate() ?>">
                             <input type="hidden" name="id"     value="<?= (int) $tr->id ?>">
-                            <input type="hidden" name="realm"  value="<?= (int) $tr->cRealmID ?>">
-                            <input type="hidden" name="guid"   value="<?= (int) $tr->cGUID ?>">
                             <button class="btn btn-xs btn-info">📨 <?= t('btn_resend') ?></button>
                         </form>
                         <?php endif; ?>

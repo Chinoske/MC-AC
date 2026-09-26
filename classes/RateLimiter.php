@@ -51,6 +51,31 @@ class RateLimiter
                 'INSERT INTO `migrador_login_attempts` (`ip_address`) VALUES (?)',
                 [self::clientIp()]
             );
+            self::purgeOld();
+        } catch (Throwable) {
+            // no crítico
+        }
+    }
+
+    /**
+     * Tira los intentos que ya no cuentan para nada. Una IP que falla y no
+     * vuelve dejaba su fila para siempre, y un EVENT de MySQL no sirve: el
+     * event_scheduler viene apagado en MariaDB.
+     *
+     * Cada ~20 fallos basta: la tabla no crece de forma apreciable entre
+     * barridos y no pagamos un DELETE en cada intento.
+     */
+    private static function purgeOld(): void
+    {
+        if (mt_rand(1, 20) !== 1) {
+            return;
+        }
+        try {
+            DB::auth()->query(
+                'DELETE FROM `migrador_login_attempts`
+                  WHERE `attempted_at` < (NOW() - INTERVAL ? MINUTE)',
+                [max(self::WINDOW_MINUTES, self::LOCKOUT_MINUTES)]
+            );
         } catch (Throwable) {
             // no crítico
         }

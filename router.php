@@ -46,6 +46,14 @@ if (preg_match('#\.(sql|log|bak|env|ini)$#i', $uri)) {
     exit('Forbidden');
 }
 
+// ── config.php y su plantilla no se piden por URL ──────────────────
+// Hoy PHP los ejecuta y devuelven cuerpo vacio, pero el .htaccess ya bloqueaba
+// config.php y no queremos depender de que PHP nunca sirva el fuente.
+if (preg_match('#^/config(\.example)?\.php$#i', $uri)) {
+    http_response_code(403);
+    exit('Forbidden');
+}
+
 // ── Proxies (antes reescritos por mod_rewrite en .htaccess) ────────
 if (preg_match('#^/api/model/(.+)$#', $uri, $m)) {
     $_GET['_path'] = $m[1];

@@ -175,10 +175,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             createTransferRecord($user->id(), $newName, 0, $realmId, $finalDump, REALMS[$realmId]['db_name']);
             unset($_SESSION['transfer_dump'], $_SESSION['transfer_realm'], $_SESSION['transfer_charname']);
             Session::flash('message', t('transfer_queued'));
-            $base = ((!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http')
-                  . '://' . $_SERVER['HTTP_HOST']
-                  . rtrim(dirname(dirname($_SERVER['SCRIPT_NAME'])), '/\\');
-            header('Location: ' . $base . '/dashboard.php');
+            header('Location: ../dashboard.php', true, 303);
             exit;
         }
     }

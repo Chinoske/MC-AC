@@ -19,6 +19,6 @@ Thumbs.db
 # Parte de config.example.php y edita tu copia.
 config.php
 
-# Dumps de prueba
-storage/*.lua
-storage/*_raw.json
+# Los chardump_* de storage/ si van al repo: tests/import_test.php los usa como
+# fixtures. Lo que se ignora son los dumps que suban los jugadores.
+storage/upload_*

@@ -43,7 +43,7 @@ class Validation
                     case 'unique':
                         // $ruleValue: ['table' => '...', 'field' => '...', 'db' => 'auth'|'chars', 'realm' => 1]
                         $realmId = (int) ($ruleValue['realm'] ?? 1);
-                        $db = ($ruleValue['db'] === 'chars') ? DB::chars($realmId) : DB::auth();
+                        $db = (($ruleValue['db'] ?? '') === 'chars') ? DB::chars($realmId) : DB::auth();
                         $tbl   = $ruleValue['table'];
                         $field = $ruleValue['field'];
                         $n = $db->count(

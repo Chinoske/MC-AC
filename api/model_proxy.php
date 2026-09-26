@@ -18,6 +18,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit;
 }
 
+// Solo para usuarios con sesion: el proxy descarga de internet y escribe en
+// disco, asi que anonimo era una via para llenar el disco a peticiones.
+require_once dirname(__DIR__) . '/config.php';
+if (!(new User())->isLoggedIn()) {
+    http_response_code(403);
+    exit('Forbidden');
+}
+
 // ── Sub-path enviado por el RewriteRule (?_path=...) ─────────
 $subPath = trim($_GET['_path'] ?? '', '/ ');
 
@@ -33,8 +41,6 @@ $subPath = preg_replace('#[^a-zA-Z0-9/_.\-]#', '', $subPath);
 $subPath = ltrim($subPath, '/');
 
 // ── Cache local ───────────────────────────────────────────────
-require_once dirname(__DIR__) . '/config.php';
-
 $cacheFile = STORAGE_PATH . '/model_cache/' . $subPath;
 $cacheDir  = dirname($cacheFile);
 
@@ -42,7 +48,8 @@ if (!is_dir($cacheDir)) {
     @mkdir($cacheDir, 0755, true);
 }
 
-// Content-Type por extensión
+// Content-Type por extensión. La lista tambien hace de whitelist: sin ella se
+// podia hacer que el proxy escribiera un .php bajo el webroot.
 $ext  = strtolower(pathinfo($subPath, PATHINFO_EXTENSION));
 $mime = match ($ext) {
     'js'    => 'application/javascript; charset=utf-8',
@@ -53,8 +60,13 @@ $mime = match ($ext) {
     'gif'   => 'image/gif',
     'woff'  => 'font/woff',
     'woff2' => 'font/woff2',
-    default => 'application/octet-stream',
+    'm2', 'skin', 'bone', 'skel', 'blp', 'anim' => 'application/octet-stream',
+    default => null,
 };
+if ($mime === null) {
+    http_response_code(400);
+    exit('Bad Request: extension no permitida');
+}
 
 // ── Cache hit ─────────────────────────────────────────────────
 if (is_file($cacheFile) && filesize($cacheFile) > 0) {
@@ -81,10 +93,6 @@ $ctx = stream_context_create([
             'Referer: https://www.wowhead.com/',
         ]),
         'ignore_errors' => true,
-    ],
-    'ssl' => [
-        'verify_peer'      => false,
-        'verify_peer_name' => false,
     ],
 ]);
 

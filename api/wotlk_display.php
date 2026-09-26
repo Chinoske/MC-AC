@@ -40,6 +40,14 @@ if ($entry <= 0 || $displayId <= 0) {
 
 require_once dirname(__DIR__) . '/config.php';
 
+// Solo para usuarios con sesion: el proxy descarga de internet y escribe en
+// disco, asi que anonimo era una via para llenar el disco a peticiones.
+if (!(new User())->isLoggedIn()) {
+    http_response_code(403);
+    echo json_encode(['error' => 'Forbidden', 'newDisplayId' => 0]);
+    exit;
+}
+
 // ── Cache local ───────────────────────────────────────────────
 $cacheDir  = STORAGE_PATH . '/model_cache/display_ids/';
 $cacheFile = $cacheDir . $entry . '_' . $displayId . '.json';
@@ -63,10 +71,6 @@ $ctx = stream_context_create([
         'timeout'       => 8,
         'header'        => 'User-Agent: Migrador-WotLK/1.0',
         'ignore_errors' => true,
-    ],
-    'ssl' => [
-        'verify_peer'      => false,
-        'verify_peer_name' => false,
     ],
 ]);
 
