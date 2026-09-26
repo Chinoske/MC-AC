@@ -13,11 +13,12 @@ Options -ExecCGI
     # GET /api/wotlk_display/{entry}/{displayId} → api/wotlk_display.php?_path=...
     RewriteRule ^api/wotlk_display/(.+)$ api/wotlk_display.php?_path=$1 [L,QSA]
 
-    # No permitir acceso a config.php directamente
-    RewriteRule ^config\.php$ - [F,L]
+    # No permitir acceso a la configuracion ni a su plantilla
+    RewriteRule ^config(\.example)?\.php$ - [F,L]
 
-    # Bloquear acceso a carpeta storage/
+    # Bloquear storage/ (chardumps, cachés, pdumps) y tests/
     RewriteRule ^storage/ - [F,L]
+    RewriteRule ^tests/ - [F,L]
 
     # Forzar HTTPS si está disponible (descomentar en producción)
     # RewriteCond %{HTTPS} off

@@ -18,6 +18,8 @@ class CharacterImporter
     private array  $data;
     private int    $newGuid;
     private int    $nextItemGuid = 0; // contador global de item GUIDs dentro del import
+    private int    $nextMailId   = 0;
+    private ImportBuffer $buf;
 
     // Posiciones de spawn seguras por facción (mapa, x, y, z, orientación)
     private const SPAWN_ALLIANCE = ['map' => 0,  'x' => -8833.38, 'y' => 628.62,  'z' => 94.00,  'o' => 0.0];
@@ -35,6 +37,9 @@ class CharacterImporter
 
     // characters.name es varchar(12)
     private const MAX_NAME_LENGTH = 12;
+
+    // Tope de las skills de arma/armadura/profesion en WotLK
+    private const MAX_SKILL_VALUE = 400;
 
     // Player.h: InventorySlots / InventoryPackSlots / BankItemSlots.
     // Los *_END del core son exclusivos; aqui guardamos el ultimo slot valido.
@@ -136,42 +141,55 @@ class CharacterImporter
     }
 
     /**
-     * Punto de entrada principal.
-     * @param string $json JSON descifrado del addon
-     * @return array ['guid' => int, 'name' => string] en éxito
+     * Genera un fichero en el formato de `.pdump load` para que lo cargue el
+     * propio worldserver. Es la via buena con el servidor encendido: el core
+     * reasigna los GUID con sus generadores, refresca el CharacterCache y
+     * actualiza el contador de personajes de la cuenta.
+     *
+     * No escribe nada en la DB.
+     *
+     * @return array{pdump: string, name: string}
+     */
+    public function buildPdump(string $json): array
+    {
+        $this->prepare($json);
+
+        // GUID locales: PlayerDumpReader los reasigna, solo tienen que ser
+        // coherentes entre las tablas del fichero.
+        $this->newGuid      = 1;
+        $this->nextItemGuid = 1;
+        $this->nextMailId   = 1;
+
+        $this->fill();
+
+        return [
+            'pdump' => (new PdumpWriter($this->pdo))->write($this->buf),
+            'name'  => $this->data['basic']['name'],
+        ];
+    }
+
+    /**
+     * Importa escribiendo directo en la DB del realm. Solo con el worldserver
+     * apagado: los GUID se reservan leyendo MAX(guid) y el core reparte los suyos
+     * desde memoria desde que arranca.
+     *
+     * @return array{guid: int, name: string}
      * @throws RuntimeException en error
      */
     public function import(string $json): array
     {
-        $this->data = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
-
-        $this->validate();
-        $this->loadValidEntries();
+        $this->prepare($json);
 
         $this->pdo->beginTransaction();
         try {
             $this->newGuid      = $this->getNextCharGuid();
             $this->nextItemGuid = $this->getNextItemGuidBase();
+            $this->nextMailId   = $this->getNextMailId();
 
-            $equipmentCache = $this->buildEquipmentCache();
+            $this->checkNameAvailable();
+            $this->fill();
 
-            $this->insertCharacter($equipmentCache);
-            $excessInventory = $this->insertInventory();
-            $excessBank      = $this->insertBank();
-            $this->insertSkills();
-            $this->insertSpells();
-            $this->insertTalents();
-            $this->insertGlyphs();
-            $this->insertReputations();
-            $this->insertHomebind();
-            $this->insertActionBar();
-            $this->insertQuests();
-
-            // Enviar por correo los items que no cupieron
-            $allExcess = array_merge($excessInventory, $excessBank);
-            if (!empty($allExcess)) {
-                $this->mailExcessItems($allExcess);
-            }
+            (new DirectWriter($this->pdo))->write($this->buf);
 
             $this->pdo->commit();
         } catch (Throwable $e) {
@@ -183,6 +201,40 @@ class CharacterImporter
         $this->updateRealmCharacters();
 
         return ['guid' => $this->newGuid, 'name' => $this->data['basic']['name']];
+    }
+
+    /** Parseo, validacion y lookups que necesitan las dos vias. */
+    private function prepare(string $json): void
+    {
+        $this->data = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
+        $this->buf  = new ImportBuffer();
+
+        $this->validate();
+        $this->loadValidEntries();
+    }
+
+    /** Llena el buffer con todas las filas del personaje. */
+    private function fill(): void
+    {
+        $equipmentCache = $this->buildEquipmentCache();
+
+        $this->insertCharacter($equipmentCache);
+        $excessInventory = $this->insertInventory();
+        $excessBank      = $this->insertBank();
+        $this->insertSkills();
+        $this->insertSpells();
+        $this->insertTalents();
+        $this->insertGlyphs();
+        $this->insertReputations();
+        $this->insertHomebind();
+        $this->insertActionBar();
+        $this->insertQuests();
+
+        // Enviar por correo los items que no cupieron
+        $allExcess = array_merge($excessInventory, $excessBank);
+        if (!empty($allExcess)) {
+            $this->mailExcessItems($allExcess);
+        }
     }
 
     // ── Validación mínima ────────────────────────────────────
@@ -202,6 +254,24 @@ class CharacterImporter
         $nameLen = mb_strlen((string) $basic['name'], 'UTF-8');
         if ($nameLen < 2 || $nameLen > self::MAX_NAME_LENGTH) {
             throw new RuntimeException('Nombre de personaje inválido.');
+        }
+    }
+
+    /**
+     * characters.name solo tiene un indice normal, no UNIQUE, asi que la DB no
+     * impide dos personajes con el mismo nombre. step2 ya lo comprueba, pero
+     * entre eso y la aprobacion del GM pueden pasar dias.
+     *
+     * Solo para la via directa: en un pdump el core renombra el que llega si el
+     * nombre esta cogido.
+     */
+    private function checkNameAvailable(): void
+    {
+        $name = mb_substr((string) $this->data['basic']['name'], 0, self::MAX_NAME_LENGTH, 'UTF-8');
+        $stmt = $this->pdo->prepare('SELECT 1 FROM `characters` WHERE `name` = ? LIMIT 1 FOR UPDATE');
+        $stmt->execute([$name]);
+        if ($stmt->fetchColumn() !== false) {
+            throw new RuntimeException("El nombre '{$name}' ya está en uso en este realm.");
         }
     }
 
@@ -403,15 +473,6 @@ class CharacterImporter
         $b    = $this->data['basic'];
         $name = mb_substr($b['name'], 0, self::MAX_NAME_LENGTH, 'UTF-8');
 
-        // characters.name solo tiene un indice normal, no UNIQUE, asi que la DB
-        // no impide dos personajes con el mismo nombre. step2 ya lo comprueba,
-        // pero entre eso y la aprobacion del GM pueden pasar dias.
-        $taken = $this->pdo->prepare('SELECT 1 FROM `characters` WHERE `name` = ? LIMIT 1 FOR UPDATE');
-        $taken->execute([$name]);
-        if ($taken->fetchColumn() !== false) {
-            throw new RuntimeException("El nombre '{$name}' ya está en uso en este realm.");
-        }
-
         $race = $b['race'] ?? 1;
         $cls  = $b['class'] ?? 1;
 
@@ -440,49 +501,6 @@ class CharacterImporter
         // cinematic = 1: marca el video de introduccion de la raza como ya
         // visto, para que un personaje migrado no lo dispare al entrar por
         // primera vez (como si fuera recien creado).
-        $stmt = $this->pdo->prepare(
-            'INSERT INTO `characters`
-             (`guid`,`account`,`name`,`race`,`class`,`gender`,`level`,`xp`,
-              `money`,`skin`,`face`,`hairStyle`,`hairColor`,`facialStyle`,
-              `bankSlots`,`restState`,`playerFlags`,
-              `map`,`position_x`,`position_y`,`position_z`,`orientation`,
-              `instance_id`,`instance_mode_mask`,`taximask`,`online`,`cinematic`,
-              `totaltime`,`leveltime`,`logout_time`,`is_logout_resting`,`rest_bonus`,
-              `resettalents_cost`,`resettalents_time`,
-              `trans_x`,`trans_y`,`trans_z`,`trans_o`,`transguid`,
-              `extra_flags`,`stable_slots`,`at_login`,`zone`,
-              `death_expire_time`,`taxi_path`,
-              `arenaPoints`,`totalHonorPoints`,`todayHonorPoints`,`yesterdayHonorPoints`,
-              `totalKills`,`todayKills`,`yesterdayKills`,`chosenTitle`,
-              `knownCurrencies`,`watchedFaction`,`drunk`,`health`,
-              `power1`,`power2`,`power3`,`power4`,`power5`,`power6`,`power7`,
-              `latency`,`talentGroupsCount`,`activeTalentGroup`,
-              `exploredZones`,`equipmentCache`,`ammoId`,`knownTitles`,
-              `actionBars`,`grantableLevels`,
-              `deleteInfos_Account`,`deleteDate`,`deleteInfos_Name`,
-              `innTriggerId`,`extraBonusTalentCount`)
-             VALUES
-             (?,?,?,?,?,?,?,?,
-              ?,0,0,0,0,0,
-              0,0,0,
-              ?,?,?,?,?,
-              0,0,"",0,1,
-              0,0,0,0,0.0,
-              0,0,
-              0,0,0,0,0,
-              0,0,5,?,
-              0,NULL,
-              ?,?,0,0,
-              0,0,0,0,
-              0,0,0,0,
-              0,0,0,0,0,0,0,
-              0,1,0,
-              \'' . self::EMPTY_EXPLORED_ZONES . '\',?,0,\'' . self::EMPTY_KNOWN_TITLES . '\',
-              0,0,
-              NULL,NULL,NULL,
-              0,0)'
-        );
-
         // gender en el dump puede venir en dos formatos:
         //   Lua viejo: 2=Male, 3=Female (UnitSex sin conversión)
         //   Lua nuevo / ya convertido: 0=Male, 1=Female
@@ -490,14 +508,43 @@ class CharacterImporter
         $rawGender = (int)($b['gender'] ?? 2);
         $dbGender  = ($rawGender >= 2) ? max(0, min(1, $rawGender - 2)) : max(0, min(1, $rawGender));
 
-        $stmt->execute([
-            $this->newGuid, $this->accountId, $name,
-            $raceId, $classId, $dbGender,
-            $level, $xp, $copper,
-            $spawn['map'], $spawn['x'], $spawn['y'], $spawn['z'], $spawn['o'],
-            $zone,
-            $arenapts, $honor,
-            $equipmentCache ?: null,
+        // at_login = 5 (AT_LOGIN_RENAME | AT_LOGIN_RESET_TALENTS): pide confirmar
+        // el nombre en el primer login y resetea los talentos, que se insertan
+        // directos sin pasar por el sistema de puntos del cliente.
+        //
+        // cinematic = 1 para que un personaje migrado no dispare el video de
+        // introduccion de su raza.
+        //
+        // exploredZones y knownTitles necesitan exactamente 128 y 6 enteros:
+        // Object::_LoadIntoDataField descarta el campo entero si no cuadra, y un
+        // NULL sacaba un warning en cada login.
+        $this->buf->add('characters', [
+            'guid'              => $this->newGuid,
+            'account'           => $this->accountId,
+            'name'              => $name,
+            'race'              => $raceId,
+            'class'             => $classId,
+            'gender'            => $dbGender,
+            'level'             => $level,
+            'xp'                => $xp,
+            'money'             => $copper,
+            'taximask'          => '',
+            'innTriggerId'      => 0,
+            'online'            => 0,
+            'cinematic'         => 1,
+            'map'               => $spawn['map'],
+            'position_x'        => $spawn['x'],
+            'position_y'        => $spawn['y'],
+            'position_z'        => $spawn['z'],
+            'orientation'       => $spawn['o'],
+            'zone'              => $zone,
+            'at_login'          => 5,
+            'arenaPoints'       => $arenapts,
+            'totalHonorPoints'  => $honor,
+            'talentGroupsCount' => 1,
+            'exploredZones'     => self::EMPTY_EXPLORED_ZONES,
+            'knownTitles'       => self::EMPTY_KNOWN_TITLES,
+            'equipmentCache'    => $equipmentCache !== '' ? $equipmentCache : null,
         ]);
     }
 
@@ -755,61 +802,56 @@ class CharacterImporter
 
     private function mailOneBatch(array $items): void
     {
-        $now    = time();
-        $mailId = $this->insertMail(
-            0,                    // sender = 0 (system)
-            $this->newGuid,       // receiver
-            t('mail_subject_excess_items'),
-            t('mail_body_excess_items'),
-            $now,
-            $now + (30 * 24 * 3600)  // expire in 30 days
-        );
-
-        $attached = 0;
+        $attachments = [];
         foreach ($items as $item) {
             $entry = (int)($item['entry'] ?? 0);
             if ($entry <= 0) continue;
 
-            $count   = max(1, (int)($item['count'] ?? 1));
-            $enchStr = $this->buildEnchStr($item);
-            $iguid   = $this->nextItemGuid();
-
-            $this->insertItemInstance($iguid, $entry, $count, $enchStr);
-
-            $this->pdo->prepare(
-                'INSERT INTO `mail_items` (`mail_id`,`item_guid`,`receiver`) VALUES (?,?,?)'
-            )->execute([$mailId, $iguid, $this->newGuid]);
-            $attached++;
+            $iguid = $this->nextItemGuid();
+            $this->insertItemInstance(
+                $iguid, $entry, max(1, (int)($item['count'] ?? 1)), $this->buildEnchStr($item)
+            );
+            $attachments[] = $iguid;
         }
+        if (empty($attachments)) return;
 
-        if ($attached > 0) {
-            $this->pdo->prepare('UPDATE `mail` SET `has_items` = 1 WHERE `id` = ?')
-                      ->execute([$mailId]);
+        $now    = time();
+        $mailId = $this->nextMailId++;
+
+        $this->buf->add('mail', [
+            'id'           => $mailId,
+            'messageType'  => 0,
+            'stationery'   => 41,
+            'mailTemplateId' => 0,
+            'sender'       => 0,          // 0 = el sistema
+            'receiver'     => $this->newGuid,
+            'subject'      => t('mail_subject_excess_items'),
+            'body'         => t('mail_body_excess_items'),
+            'has_items'    => 1,
+            'expire_time'  => $now + (30 * 24 * 3600),
+            'deliver_time' => $now,
+            'money'        => 0,
+            'cod'          => 0,
+            'checked'      => 0,
+        ]);
+
+        foreach ($attachments as $iguid) {
+            $this->buf->add('mail_items', [
+                'mail_id'   => $mailId,
+                'item_guid' => $iguid,
+                'receiver'  => $this->newGuid,
+            ]);
         }
     }
 
-    private function insertMail(
-        int    $sender,
-        int    $receiver,
-        string $subject,
-        string $body,
-        int    $deliverTime,
-        int    $expireTime
-    ): int {
-        // mail.id no es AUTO_INCREMENT (el core lo genera en memoria con
-        // ObjectMgr::GenerateMailID), asi que lastInsertId() devolvia 0 y el
-        // segundo correo chocaba con la PK.
-        $mailId = (int) $this->pdo->query('SELECT MAX(`id`) FROM `mail` FOR UPDATE')->fetchColumn() + 1;
-
-        $stmt = $this->pdo->prepare(
-            'INSERT INTO `mail`
-             (`id`,`messageType`,`stationery`,`mailTemplateId`,`sender`,`receiver`,
-              `subject`,`body`,`has_items`,`expire_time`,`deliver_time`,
-              `money`,`cod`,`checked`)
-             VALUES (?,0,41,0,?,?,?,?,0,?,?,0,0,0)'
-        );
-        $stmt->execute([$mailId, $sender, $receiver, $subject, $body, $expireTime, $deliverTime]);
-        return $mailId;
+    /**
+     * Siguiente id de correo libre. mail.id no es AUTO_INCREMENT: el core lo
+     * genera en memoria con ObjectMgr::GenerateMailID, asi que lastInsertId()
+     * devolvia 0 y el segundo correo chocaba con la PK.
+     */
+    private function getNextMailId(): int
+    {
+        return (int) $this->pdo->query('SELECT MAX(`id`) FROM `mail` FOR UPDATE')->fetchColumn() + 1;
     }
 
     // ── Skills ───────────────────────────────────────────────
@@ -856,17 +898,15 @@ class CharacterImporter
 
     private function insertSkills(): void
     {
-        $skills = $this->data['skills'] ?? [];
-        $stmt   = $this->pdo->prepare(
-            'INSERT IGNORE INTO `character_skills` (`guid`,`skill`,`value`,`max`) VALUES (?,?,?,?)'
-        );
-        foreach ($skills as $sk) {
-            $id    = (int)($sk['id']    ?? 0);
-            $value = (int)($sk['value'] ?? 0);
-            $max   = (int)($sk['max']   ?? 300);
-            if ($id > 0) {
-                $stmt->execute([$this->newGuid, $id, $value, $max]);
-            }
+        foreach (($this->data['skills'] ?? []) as $sk) {
+            $id = (int)($sk['id'] ?? 0);
+            if ($id <= 0) continue;
+            $this->buf->add('character_skills', [
+                'guid'  => $this->newGuid,
+                'skill' => $id,
+                'value' => (int)($sk['value'] ?? 0),
+                'max'   => (int)($sk['max'] ?? 300),
+            ]);
         }
 
         $this->maxClassWeaponAndArmorSkills();
@@ -911,45 +951,46 @@ class CharacterImporter
             $skillIds[] = self::PLATE_MAIL_SKILL;
         }
 
-        $upsert = $this->pdo->prepare(
-            'INSERT INTO `character_skills` (`guid`,`skill`,`value`,`max`) VALUES (?,?,400,400)
-             ON DUPLICATE KEY UPDATE `value` = 400, `max` = 400'
-        );
         foreach (array_unique($skillIds) as $skillId) {
-            $upsert->execute([$this->newGuid, (int)$skillId]);
+            $this->maxSkill((int)$skillId);
         }
     }
 
     /** Sube a 400 las profesiones/secundarias que el dump ya trae. */
     private function maxKnownProfessionSkills(): void
     {
-        $skills = $this->data['skills'] ?? [];
-        $upsert = $this->pdo->prepare(
-            'INSERT INTO `character_skills` (`guid`,`skill`,`value`,`max`) VALUES (?,?,400,400)
-             ON DUPLICATE KEY UPDATE `value` = 400, `max` = 400'
-        );
-        foreach ($skills as $sk) {
+        foreach (($this->data['skills'] ?? []) as $sk) {
             $id = (int)($sk['id'] ?? 0);
             if (in_array($id, self::PROFESSION_AND_SECONDARY_SKILLS, true)) {
-                $upsert->execute([$this->newGuid, $id]);
+                $this->maxSkill($id);
             }
         }
+    }
+
+    /** Sube un skill a su tope. Sustituye al ON DUPLICATE KEY del insert directo. */
+    private function maxSkill(int $skillId): void
+    {
+        $this->buf->add('character_skills', [
+            'guid'  => $this->newGuid,
+            'skill' => $skillId,
+            'value' => self::MAX_SKILL_VALUE,
+            'max'   => self::MAX_SKILL_VALUE,
+        ]);
     }
 
     // ── Spells ───────────────────────────────────────────────
 
     private function insertSpells(): void
     {
-        $spells = $this->data['spells'] ?? [];
-        // character_spell: guid, spell, specMask (255 = todos los specs)
-        $stmt   = $this->pdo->prepare(
-            'INSERT IGNORE INTO `character_spell` (`guid`,`spell`,`specMask`) VALUES (?,?,255)'
-        );
-        foreach ($spells as $spellId) {
+        // specMask 255 = todos los specs
+        foreach (($this->data['spells'] ?? []) as $spellId) {
             $id = (int)$spellId;
-            if ($id > 0) {
-                $stmt->execute([$this->newGuid, $id]);
-            }
+            if ($id <= 0) continue;
+            $this->buf->add('character_spell', [
+                'guid'     => $this->newGuid,
+                'spell'    => $id,
+                'specMask' => 255,
+            ]);
         }
     }
 
@@ -957,16 +998,15 @@ class CharacterImporter
 
     private function insertTalents(): void
     {
-        $talents = $this->data['talents'] ?? [];
-        // character_talent: guid, spell, specMask (1 = primer spec)
-        $stmt    = $this->pdo->prepare(
-            'INSERT IGNORE INTO `character_talent` (`guid`,`spell`,`specMask`) VALUES (?,?,1)'
-        );
-        foreach ($talents as $t) {
+        // specMask 1 = primer spec
+        foreach (($this->data['talents'] ?? []) as $t) {
             $spellId = (int)($t['spell'] ?? 0);
-            if ($spellId > 0) {
-                $stmt->execute([$this->newGuid, $spellId]);
-            }
+            if ($spellId <= 0) continue;
+            $this->buf->add('character_talent', [
+                'guid'     => $this->newGuid,
+                'spell'    => $spellId,
+                'specMask' => 1,
+            ]);
         }
     }
 
@@ -985,30 +1025,32 @@ class CharacterImporter
                 $g[$slot] = $spell;
             }
         }
-        $stmt = $this->pdo->prepare(
-            'INSERT IGNORE INTO `character_glyphs`
-             (`guid`,`talentGroup`,`glyph1`,`glyph2`,`glyph3`,`glyph4`,`glyph5`,`glyph6`)
-             VALUES (?,0,?,?,?,?,?,?)'
-        );
-        $stmt->execute([$this->newGuid, $g[0],$g[1],$g[2],$g[3],$g[4],$g[5]]);
+        $this->buf->add('character_glyphs', [
+            'guid'        => $this->newGuid,
+            'talentGroup' => 0,
+            'glyph1'      => $g[0],
+            'glyph2'      => $g[1],
+            'glyph3'      => $g[2],
+            'glyph4'      => $g[3],
+            'glyph5'      => $g[4],
+            'glyph6'      => $g[5],
+        ]);
     }
 
     // ── Reputaciones ─────────────────────────────────────────
 
     private function insertReputations(): void
     {
-        $reps = $this->data['reputations'] ?? [];
-        $stmt = $this->pdo->prepare(
-            'INSERT IGNORE INTO `character_reputation`
-             (`guid`,`faction`,`standing`,`flags`) VALUES (?,?,?,4)'
-        );
-        foreach ($reps as $r) {
-            $factionId = (int)($r['id']    ?? 0);
-            $value     = (int)($r['value'] ?? 0);
-            $value     = max(-42000, min(42999, $value));
-            if ($factionId > 0) {
-                $stmt->execute([$this->newGuid, $factionId, $value]);
-            }
+        // flags 4 = FACTION_FLAG_VISIBLE
+        foreach (($this->data['reputations'] ?? []) as $r) {
+            $factionId = (int)($r['id'] ?? 0);
+            if ($factionId <= 0) continue;
+            $this->buf->add('character_reputation', [
+                'guid'     => $this->newGuid,
+                'faction'  => $factionId,
+                'standing' => max(-42000, min(42999, (int)($r['value'] ?? 0))),
+                'flags'    => 4,
+            ]);
         }
     }
 
@@ -1022,14 +1064,13 @@ class CharacterImporter
         $spawn   = $faction === 1 ? self::SPAWN_HORDE : self::SPAWN_ALLIANCE;
         $areaId  = $faction === 1 ? 1637 : 1537;
 
-        $stmt = $this->pdo->prepare(
-            'INSERT IGNORE INTO `character_homebind`
-             (`guid`,`mapId`,`zoneId`,`posX`,`posY`,`posZ`) VALUES (?,?,?,?,?,?)'
-        );
-        $stmt->execute([
-            $this->newGuid,
-            $spawn['map'], $areaId,
-            $spawn['x'], $spawn['y'], $spawn['z'],
+        $this->buf->add('character_homebind', [
+            'guid'   => $this->newGuid,
+            'mapId'  => $spawn['map'],
+            'zoneId' => $areaId,
+            'posX'   => $spawn['x'],
+            'posY'   => $spawn['y'],
+            'posZ'   => $spawn['z'],
         ]);
     }
 
@@ -1059,11 +1100,14 @@ class CharacterImporter
         }
         if (empty($rows)) return;
 
-        $stmt = $this->pdo->prepare(
-            'INSERT IGNORE INTO `character_action` (`guid`,`spec`,`button`,`action`,`type`) VALUES (?,0,?,?,?)'
-        );
         foreach ($rows as $r) {
-            $stmt->execute([$this->newGuid, (int)$r->button, (int)$r->action, (int)$r->type]);
+            $this->buf->add('character_action', [
+                'guid'   => $this->newGuid,
+                'spec'   => 0,
+                'button' => (int)$r->button,
+                'action' => (int)$r->action,
+                'type'   => (int)$r->type,
+            ]);
         }
     }
 
@@ -1102,14 +1146,15 @@ class CharacterImporter
         if (empty($valid)) return;
 
         // QuestDef.h: QUEST_STATUS_COMPLETE = 1, QUEST_STATUS_INCOMPLETE = 3
-        $stmt = $this->pdo->prepare(
-            'INSERT IGNORE INTO `character_queststatus` (`guid`,`quest`,`status`,`explored`)
-             VALUES (?,?,?,0)'
-        );
         foreach ($quests as $q) {
             $id = (int)($q['id'] ?? 0);
             if ($id <= 0 || !isset($valid[$id])) continue;
-            $stmt->execute([$this->newGuid, $id, !empty($q['complete']) ? 1 : 3]);
+            $this->buf->add('character_queststatus', [
+                'guid'     => $this->newGuid,
+                'quest'    => $id,
+                'status'   => !empty($q['complete']) ? 1 : 3,
+                'explored' => 0,
+            ]);
         }
     }
 
@@ -1180,20 +1225,26 @@ class CharacterImporter
         // asi que un 0 se queda en 0 y el item entra roto.
         $durability = $this->itemMaxDurability[$entry] ?? 0;
 
-        $this->pdo->prepare(
-            'INSERT INTO `item_instance`
-             (`guid`,`owner_guid`,`itemEntry`,`creatorGuid`,`giftCreatorGuid`,
-              `count`,`duration`,`charges`,`flags`,`enchantments`,`randomPropertyId`,
-              `durability`,`playedTime`,`text`)
-             VALUES (?,?,?,0,0,?,0,\'\',0,?,0,?,0,\'\')'
-        )->execute([$iguid, $this->newGuid, $entry, $count, $enchStr, $durability]);
+        $this->buf->add('item_instance', [
+            'guid'         => $iguid,
+            'owner_guid'   => $this->newGuid,
+            'itemEntry'    => $entry,
+            'count'        => $count,
+            'charges'      => '',
+            'enchantments' => $enchStr,
+            'durability'   => $durability,
+            'text'         => '',
+        ]);
     }
 
     private function insertCharInventory(int $iguid, int $bag, int $slot): void
     {
-        $this->pdo->prepare(
-            'INSERT INTO `character_inventory` (`guid`,`bag`,`slot`,`item`) VALUES (?,?,?,?)'
-        )->execute([$this->newGuid, $bag, $slot, $iguid]);
+        $this->buf->add('character_inventory', [
+            'guid' => $this->newGuid,
+            'bag'  => $bag,
+            'slot' => $slot,
+            'item' => $iguid,
+        ]);
     }
 
     // ── Helpers de conversión nombre→ID ─────────────────────

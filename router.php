@@ -35,7 +35,10 @@ $uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH) ?? '/';
 // ── Bloquear acceso directo a storage/ (chardumps, cachés, sesiones) ──
 // El regex va con /i: en Windows el filesystem no distingue mayusculas y
 // GET /Storage/... servia el archivo igualmente.
-if (preg_match('#^/storage(/|$)#i', $uri)) {
+//
+// tests/ tambien: import_test.php se niega a correr fuera de consola, pero
+// PdumpParser.php es una clase suelta y se servia con un 200.
+if (preg_match('#^/(storage|tests)(/|$)#i', $uri)) {
     http_response_code(403);
     exit('Forbidden');
 }

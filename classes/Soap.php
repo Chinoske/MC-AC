@@ -55,6 +55,33 @@ class Soap
     }
 
     /**
+     * Pide al worldserver que cargue un pdump con `.pdump load`.
+     *
+     * Es la via buena para importar con el servidor encendido: PlayerDumpReader
+     * reasigna los GUID con los generadores del core, refresca el CharacterCache
+     * y actualiza el contador de personajes de la cuenta. Nada de eso se puede
+     * hacer bien escribiendo en la DB por debajo.
+     *
+     * $file tiene que ser una ruta que pueda abrir el worldserver, no la web.
+     */
+    public function pdumpLoad(string $file, int $accountId, string $charName): string
+    {
+        return $this->command(self::pdumpCommand($file, $accountId, $charName));
+    }
+
+    /**
+     * El comando tal cual se le manda al worldserver.
+     *
+     * `.pdump load <fichero> <cuenta> [nombre]`, y el parser del comando corta
+     * por espacios, asi que la ruta va entre comillas. El nombre ya paso por
+     * isValidCharName(), que solo admite letras.
+     */
+    public static function pdumpCommand(string $file, int $accountId, string $charName): string
+    {
+        return sprintf('pdump load "%s" %d %s', $file, $accountId, $charName);
+    }
+
+    /**
      * Comprueba si el worldserver del realm está accesible (TCP).
      * Timeout de 0.5 segundos para no bloquear la UI.
      */
