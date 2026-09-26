@@ -7,13 +7,15 @@
 --  O importar desde phpMyAdmin seleccionando la base acore_auth
 -- ═══════════════════════════════════════════════════════════════
 
-USE `acore_auth`;
+-- Sin USE: las tablas van a la base que le pases al cliente mysql, para que
+-- funcione tambien si tu DB auth no se llama acore_auth (DB_AUTH_NAME).
+
 
 -- ── Tabla principal de transferencias ────────────────────────
 CREATE TABLE IF NOT EXISTS `account_transfer` (
     `id`          INT UNSIGNED     NOT NULL AUTO_INCREMENT,
     `cAccount`    INT UNSIGNED     NOT NULL DEFAULT 0    COMMENT 'ID de cuenta del jugador',
-    `cName`       VARCHAR(16)      NOT NULL DEFAULT ''   COMMENT 'Nombre del personaje',
+    `cName`       VARCHAR(12)      NOT NULL DEFAULT ''   COMMENT 'Nombre del personaje (characters.name es varchar(12))',
     `cGUID`       INT UNSIGNED     NOT NULL DEFAULT 0    COMMENT 'GUID del personaje en el realm destino',
     `cRealmID`    TINYINT UNSIGNED NOT NULL DEFAULT 1    COMMENT 'ID del realm destino',
     `cRealmList`  VARCHAR(64)      NOT NULL DEFAULT ''   COMMENT 'Nombre de la DB del realm',
@@ -99,4 +101,11 @@ CREATE TABLE IF NOT EXISTS `migrador_login_attempts` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   COMMENT='Intentos de login fallidos en la web, para bloqueo temporal por IP';
 
-SELECT 'Migrador instalado correctamente en acore_auth.' AS resultado;
+-- Los intentos de login de IPs que nunca aciertan no los borra nadie
+-- (RateLimiter::clear solo limpia la IP que entra), asi que conviene purgar.
+CREATE EVENT IF NOT EXISTS `ev_migrador_purge_login_attempts`
+    ON SCHEDULE EVERY 1 DAY
+    DO DELETE FROM `migrador_login_attempts`
+        WHERE `attempted_at` < (NOW() - INTERVAL 1 DAY);
+
+SELECT 'Migrador instalado correctamente.' AS resultado;

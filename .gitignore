@@ -14,3 +14,11 @@ storage/sessions/
 # Windows
 desktop.ini
 Thumbs.db
+
+# Configuracion local: lleva credenciales de DB y SOAP.
+# Parte de config.example.php y edita tu copia.
+config.php
+
+# Dumps de prueba
+storage/*.lua
+storage/*_raw.json

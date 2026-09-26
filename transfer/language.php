@@ -52,7 +52,6 @@ $LANG = [
         'transfer_cancelled'    => 'Transferencia cancelada correctamente.',
         'transfer_approved'     => '✔ Transferencia aprobada. El personaje ha sido asignado a tu cuenta.',
         'transfer_denied'       => 'Transferencia denegada.',
-        'achievement_fail'      => 'Tu personaje no cumple el mínimo de logros requerido (' . MIN_ACHIEVEMENTS . ').',
         'level_fail'            => 'El nivel del personaje supera el máximo permitido (' . MAX_LEVEL . ').',
         'blacklisted'           => 'Tu cuenta está en la lista negra de transferencias.',
         'invalid_dump'          => 'El dump de personaje no es válido o está corrupto.',
@@ -130,7 +129,6 @@ $LANG = [
         'transfer_cancelled'    => 'Transfer cancelled.',
         'transfer_approved'     => '✔ Transfer approved. Character assigned to your account.',
         'transfer_denied'       => 'Transfer denied.',
-        'achievement_fail'      => 'Character does not meet the minimum achievement requirement (' . MIN_ACHIEVEMENTS . ').',
         'level_fail'            => 'Character level exceeds the allowed maximum (' . MAX_LEVEL . ').',
         'blacklisted'           => 'Your account is blacklisted from transfers.',
         'invalid_dump'          => 'Invalid or corrupted character dump.',
@@ -203,7 +201,6 @@ $LANG = [
         'transfer_cancelled'    => 'Transfert annulé avec succès.',
         'transfer_approved'     => '✔ Transfert approuvé. Le personnage a été attribué à votre compte.',
         'transfer_denied'       => 'Transfert refusé.',
-        'achievement_fail'      => 'Votre personnage n\'atteint pas le minimum de hauts faits requis (' . MIN_ACHIEVEMENTS . ').',
         'level_fail'            => 'Le niveau du personnage dépasse le maximum autorisé (' . MAX_LEVEL . ').',
         'blacklisted'           => 'Votre compte figure sur la liste noire des transferts.',
         'invalid_dump'          => 'Le dump du personnage est invalide ou corrompu.',
@@ -275,7 +272,6 @@ $LANG = [
         'transfer_cancelled'    => 'Transfer storniert.',
         'transfer_approved'     => '✔ Transfer genehmigt. Der Charakter wurde deinem Konto zugewiesen.',
         'transfer_denied'       => 'Transfer abgelehnt.',
-        'achievement_fail'      => 'Charakter erfüllt nicht die Mindestanzahl an Erfolgen (' . MIN_ACHIEVEMENTS . ').',
         'level_fail'            => 'Charakterstufe überschreitet das erlaubte Maximum (' . MAX_LEVEL . ').',
         'blacklisted'           => 'Dein Konto ist für Transfers gesperrt.',
         'invalid_dump'          => 'Ungültiger oder beschädigter Charakter-Dump.',
@@ -347,7 +343,6 @@ $LANG = [
         'transfer_cancelled'    => 'Перенос отменён.',
         'transfer_approved'     => '✔ Перенос одобрен. Персонаж привязан к вашей учётной записи.',
         'transfer_denied'       => 'Перенос отклонён.',
-        'achievement_fail'      => 'Персонаж не соответствует минимальному количеству достижений (' . MIN_ACHIEVEMENTS . ').',
         'level_fail'            => 'Уровень персонажа превышает допустимый максимум (' . MAX_LEVEL . ').',
         'blacklisted'           => 'Ваша учётная запись в чёрном списке переносов.',
         'invalid_dump'          => 'Дамп персонажа недействителен или повреждён.',
@@ -419,7 +414,6 @@ $LANG = [
         'transfer_cancelled'    => 'Transferência cancelada com sucesso.',
         'transfer_approved'     => '✔ Transferência aprovada. O personagem foi atribuído à sua conta.',
         'transfer_denied'       => 'Transferência negada.',
-        'achievement_fail'      => 'Seu personagem não atende ao mínimo de conquistas exigido (' . MIN_ACHIEVEMENTS . ').',
         'level_fail'            => 'O nível do personagem excede o máximo permitido (' . MAX_LEVEL . ').',
         'blacklisted'           => 'Sua conta está na lista negra de transferências.',
         'invalid_dump'          => 'O dump do personagem é inválido ou está corrompido.',
@@ -1197,6 +1191,35 @@ $LANG = array_replace_recursive($LANG, [
     ],
 ]);
 
+// Worldserver arriba: el import chocaria con los GUID que el core tiene
+// reservados en memoria, asi que la aprobacion queda bloqueada.
+$LANG = array_replace_recursive($LANG, [
+    'es' => [
+        'warn_worldserver_online' => "El worldserver de %s esta encendido: la aprobacion queda bloqueada hasta que lo apagues, porque el import chocaria con los GUID que el servidor tiene reservados en memoria.",
+        'import_blocked_online'   => "Aprobacion bloqueada: el worldserver de %s esta encendido. Apagalo e intentalo de nuevo, o pon ALLOW_IMPORT_WHILE_ONLINE en true si sabes lo que haces.",
+    ],
+    'en' => [
+        'warn_worldserver_online' => "The worldserver for %s is running: approval stays blocked until you shut it down, because the import would clash with the GUIDs the server has reserved in memory.",
+        'import_blocked_online'   => "Approval blocked: the worldserver for %s is running. Shut it down and try again, or set ALLOW_IMPORT_WHILE_ONLINE to true if you know what you are doing.",
+    ],
+    'fr' => [
+        'warn_worldserver_online' => "Le worldserver de %s est demarre : l'approbation reste bloquee jusqu'a son arret, car l'import entrerait en conflit avec les GUID reserves en memoire par le serveur.",
+        'import_blocked_online'   => "Approbation bloquee : le worldserver de %s est demarre. Arretez-le et reessayez, ou mettez ALLOW_IMPORT_WHILE_ONLINE a true si vous savez ce que vous faites.",
+    ],
+    'de' => [
+        'warn_worldserver_online' => "Der Worldserver von %s lauft: die Genehmigung bleibt blockiert, bis du ihn stoppst, denn der Import wurde mit den im Speicher reservierten GUIDs kollidieren.",
+        'import_blocked_online'   => "Genehmigung blockiert: der Worldserver von %s lauft. Stoppe ihn und versuche es erneut, oder setze ALLOW_IMPORT_WHILE_ONLINE auf true, wenn du weisst was du tust.",
+    ],
+    'ru' => [
+        'warn_worldserver_online' => "Worldserver realm %s запущен: одобрение заблокировано, пока вы его не остановите, иначе импорт столкнется с GUID, зарезервированными сервером в памяти.",
+        'import_blocked_online'   => "Одобрение заблокировано: worldserver realm %s запущен. Остановите его и попробуйте снова, либо включите ALLOW_IMPORT_WHILE_ONLINE, если понимаете последствия.",
+    ],
+    'pt' => [
+        'warn_worldserver_online' => "O worldserver de %s esta ligado: a aprovacao fica bloqueada ate voce desliga-lo, porque o import colidiria com os GUIDs reservados pelo servidor na memoria.",
+        'import_blocked_online'   => "Aprovacao bloqueada: o worldserver de %s esta ligado. Desligue-o e tente novamente, ou defina ALLOW_IMPORT_WHILE_ONLINE como true se sabe o que faz.",
+    ],
+]);
+
 /** Idioma activo: el elegido en sesión, o DEFAULT_LANG si no eligió ninguno. */
 function currentLang(): string
 {
@@ -1221,6 +1244,21 @@ function t(string $key): string
  * Selector de idioma reutilizable — un <form> GET a set_lang.php con la
  * ruta actual como "volver a" (validada server-side, sin URLs externas).
  */
+/**
+ * Traduccion lista para usar dentro de un atributo onsubmit/onclick.
+ * Devuelve el literal JS con sus comillas: confirm(<?= jsText('k') ?>).
+ * Un apostrofe en la traduccion (fr: "l'annulation") cerraba la cadena JS y
+ * el handler no compilaba, asi que el form se enviaba sin confirmar.
+ */
+function jsText(string $key): string
+{
+    return htmlspecialchars(
+        json_encode(t($key), JSON_UNESCAPED_UNICODE),
+        ENT_QUOTES,
+        'UTF-8'
+    );
+}
+
 function renderLangSwitcher(): void
 {
     $current = currentLang();

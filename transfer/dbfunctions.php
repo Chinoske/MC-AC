@@ -67,37 +67,6 @@ function isAccountBlacklisted(int $accountId): bool
 }
 
 /**
- * Devuelve el nivel GM de una cuenta (0 si no es GM).
- * account_access: id=account_id, gmlevel, RealmID (-1 = todos)
- * -1 cubre "todos los realms"; el resto son los realms realmente
- * configurados en REALMS (config.php), no solo el 1.
- */
-function getGMLevel(int $accountId): int
-{
-    try {
-        $realmIds     = array_merge([-1], array_keys(REALMS));
-        $placeholders = implode(',', array_fill(0, count($realmIds), '?'));
-        $row = DB::auth()->row(
-            "SELECT MAX(`gmlevel`) AS `gmlevel`
-               FROM `account_access`
-              WHERE `id` = ? AND `RealmID` IN ({$placeholders})",
-            [$accountId, ...$realmIds]
-        );
-        return $row ? (int) $row->gmlevel : 0;
-    } catch (Throwable) {
-        return 0;
-    }
-}
-
-/**
- * ¿Tiene la cuenta acceso GM para aprobar transferencias?
- */
-function hasGMAccess(int $accountId): bool
-{
-    return getGMLevel($accountId) >= GM_MIN_LEVEL;
-}
-
-/**
  * Devuelve el estado de una transferencia o -1 si no existe.
  * 0=En progreso | 1=Aprobado | 2=Denegado | 3=Cancelado | 4=Reenviado
  */
@@ -175,51 +144,29 @@ function getAccountTransfers(int $accountId, bool $asGM = false): array
 
 /**
  * Aplica el dump del personaje en la DB del realm.
- * - JSON (chardump v2): usa CharacterImporter para generar INSERTs seguros con nuevo GUID
- * - SQL  (chardump v1): ejecuta los statements directamente en transacción
+ * Solo acepta el formato JSON de chardump v2, que CharacterImporter valida
+ * campo a campo.
  *
  * Devuelve el GUID del personaje importado (>0) o 0 en caso de error.
  */
 function applyCharacterDump(int $realmId, string $dump, int $targetAccountId): int
 {
-    // ── Formato JSON — chardump v2 ────────────────────────────
-    if (CharacterImporter::isJsonDump($dump)) {
-        try {
-            $importer = new CharacterImporter($realmId, $targetAccountId);
-            $result   = $importer->import($dump);
-            refreshCharacterCache($realmId, $result['name']);
-            return (int) $result['guid'];
-        } catch (Throwable $e) {
-            error_log('[Migrador] CharacterImporter error: ' . $e->getMessage());
-            return 0;
-        }
+    // El dump lo sube el jugador y su "cifrado" es un base64 invertido, asi que
+    // es entrada no confiable. La ruta v1 ejecutaba su SQL con PDO::exec(), lo
+    // que permitia cualquier statement (p.ej. un INSERT en account_access) con
+    // un clic de GM como unico filtro.
+    if (!CharacterImporter::isJsonDump($dump)) {
+        error_log('[Migrador] Dump rechazado: solo se acepta el formato JSON de chardump v2.');
+        return 0;
     }
 
-    // ── Formato SQL — chardump v1 (legacy) ───────────────────
     try {
-        $pdo = DB::chars($realmId)->getPdo();
-        $pdo->beginTransaction();
-
-        $stmts = array_filter(
-            array_map('trim', explode(';', $dump)),
-            fn($s) => !empty($s) && !str_starts_with(ltrim($s), '--')
-        );
-
-        foreach ($stmts as $sql) {
-            if (!empty(trim($sql))) {
-                $pdo->exec($sql);
-            }
-        }
-
-        $pdo->commit();
-
-        // Para SQL legacy, intentar extraer el GUID del dump
-        return extractGuidFromDump($dump);
+        $importer = new CharacterImporter($realmId, $targetAccountId);
+        $result   = $importer->import($dump);
+        refreshCharacterCache($realmId, $result['name']);
+        return (int) $result['guid'];
     } catch (Throwable $e) {
-        if (isset($pdo) && $pdo->inTransaction()) {
-            $pdo->rollBack();
-        }
-        error_log('[Migrador] Error aplicando dump SQL: ' . $e->getMessage());
+        error_log('[Migrador] CharacterImporter error: ' . $e->getMessage());
         return 0;
     }
 }
@@ -255,32 +202,6 @@ function cancelOrDenyTransfer(int $guid, int $realmId): void
             // Tabla inexistente o registro ya borrado: continuar
         }
     }
-}
-
-/**
- * Mueve el personaje a una cuenta GM temporalmente (durante revisión).
- */
-function moveCharacterToGMAccount(int $guid, int $realmId, int $gmAccountId): void
-{
-    DB::chars($realmId)->update(
-        'characters',
-        ['account' => $gmAccountId],
-        '`guid` = ?',
-        [$guid]
-    );
-}
-
-/**
- * Aprueba la transferencia: asigna el personaje a la cuenta real del jugador.
- */
-function approveCharacterTransfer(int $guid, int $realmId, int $targetAccountId): void
-{
-    DB::chars($realmId)->update(
-        'characters',
-        ['account' => $targetAccountId],
-        '`guid` = ?',
-        [$guid]
-    );
 }
 
 /**
@@ -327,10 +248,3 @@ function getRealmList(): array
     );
 }
 
-/**
- * Obtiene el account_id del usuario en sesión activa.
- */
-function getSessionAccountId(): int
-{
-    return (int) ($_SESSION['user_id'] ?? 0);
-}

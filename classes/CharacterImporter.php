@@ -4,7 +4,7 @@
  * Compatible: AzerothCore WotLK 3.3.5a — última revisión
  *
  * Flujo:
- *   1. Recibe el JSON descifrado (ya pasado por decryptDump())
+ *   1. Recibe el JSON decodificado (ya pasado por decodeDump())
  *   2. Genera un nuevo GUID único en el realm
  *   3. Inserta en todas las tablas necesarias (characters, inventory, skills, etc.)
  *   4. Items que no caben en el inventario se envían por correo
@@ -29,6 +29,16 @@ class CharacterImporter
     // PLAYER_EXPLORED_ZONES_SIZE = 128, KNOWN_TITLES_SIZE * 2 = 6 (Player.h)
     private const EMPTY_EXPLORED_ZONES = '0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0';
     private const EMPTY_KNOWN_TITLES   = '0 0 0 0 0 0';
+
+    // Mail.h: MAX_MAIL_ITEMS, limite del cliente
+    private const MAX_MAIL_ITEMS = 12;
+
+    // characters.name es varchar(12)
+    private const MAX_NAME_LENGTH = 12;
+
+    // Item.h: EnchantmentSlot
+    private const PERM_ENCHANTMENT_SLOT = 0;
+    private const SOCK_ENCHANTMENT_SLOT = 2;
 
     // Razas y su facción: 0=Alliance, 1=Horde
     private const RACE_FACTION = [
@@ -178,22 +188,31 @@ class CharacterImporter
         if ($level < 1 || $level > MAX_LEVEL) {
             throw new RuntimeException("Nivel de personaje inválido: {$level}.");
         }
-        if (strlen($basic['name']) < 2 || strlen($basic['name']) > 16) {
+        // mb_strlen: un nombre en cirilico ocupa 2 bytes por letra y strlen
+        // rechazaba nombres validos.
+        $nameLen = mb_strlen((string) $basic['name'], 'UTF-8');
+        if ($nameLen < 2 || $nameLen > self::MAX_NAME_LENGTH) {
             throw new RuntimeException('Nombre de personaje inválido.');
         }
     }
 
     // ── Generadores de GUIDs ─────────────────────────────────
 
+    // FOR UPDATE: se llaman dentro de la transaccion del import, asi que dos
+    // GMs aprobando a la vez quedan serializados en vez de reservar el mismo
+    // GUID. No protege contra el worldserver, que reparte los suyos desde
+    // memoria: para eso el import esta bloqueado mientras este arriba.
     private function getNextCharGuid(): int
     {
-        $row = $this->pdo->query('SELECT MAX(`guid`) AS m FROM `characters`')->fetch(PDO::FETCH_OBJ);
+        $row = $this->pdo->query('SELECT MAX(`guid`) AS m FROM `characters` FOR UPDATE')
+                         ->fetch(PDO::FETCH_OBJ);
         return (int)($row->m ?? 0) + 1;
     }
 
     private function getNextItemGuidBase(): int
     {
-        $row = $this->pdo->query('SELECT MAX(`guid`) AS m FROM `item_instance`')->fetch(PDO::FETCH_OBJ);
+        $row = $this->pdo->query('SELECT MAX(`guid`) AS m FROM `item_instance` FOR UPDATE')
+                         ->fetch(PDO::FETCH_OBJ);
         return (int)($row->m ?? 0) + 1;
     }
 
@@ -218,6 +237,9 @@ class CharacterImporter
     /** @var array<int,true> entries que realmente existen en item_template */
     private array $validEntries = [];
 
+    /** @var array<int,int> entry → item_template.MaxDurability */
+    private array $itemMaxDurability = [];
+
     /**
      * Carga en $validEntries todos los entries de equipped/bags/bank que
      * realmente existen en item_template. Un dump manipulado (o
@@ -239,12 +261,14 @@ class CharacterImporter
         if (empty($entries)) return;
 
         try {
+            $w    = $this->worldDb();
             $in   = implode(',', $entries);
             $rows = $this->pdo->query(
-                "SELECT entry FROM acore_world.item_template WHERE entry IN ({$in})"
-            )->fetchAll(PDO::FETCH_COLUMN);
-            foreach ($rows as $entry) {
-                $this->validEntries[(int)$entry] = true;
+                "SELECT entry, MaxDurability FROM {$w}.item_template WHERE entry IN ({$in})"
+            )->fetchAll(PDO::FETCH_OBJ);
+            foreach ($rows as $r) {
+                $this->validEntries[(int)$r->entry]      = true;
+                $this->itemMaxDurability[(int)$r->entry] = (int)$r->MaxDurability;
             }
         } catch (Throwable $e) {
             // Si el lookup falla, no bloqueamos el import completo por esto -
@@ -281,10 +305,11 @@ class CharacterImporter
         $this->equippedItemMeta = [];
         if (!empty($slotEntry)) {
             $entryList = implode(',', array_unique(array_values($slotEntry)));
+            $w = $this->worldDb();
             try {
                 $rows = $this->pdo->query(
                     "SELECT entry, displayid, InventoryType
-                     FROM acore_world.item_template
+                     FROM {$w}.item_template
                      WHERE entry IN ({$entryList})"
                 )->fetchAll(PDO::FETCH_OBJ);
                 foreach ($rows as $r) {
@@ -343,9 +368,10 @@ class CharacterImporter
 
         $map = [];
         try {
+            $w    = $this->worldDb();
             $in   = implode(',', $entries);
             $rows = $this->pdo->query(
-                "SELECT entry, InventoryType FROM acore_world.item_template WHERE entry IN ({$in})"
+                "SELECT entry, InventoryType FROM {$w}.item_template WHERE entry IN ({$in})"
             )->fetchAll(PDO::FETCH_OBJ);
             foreach ($rows as $r) {
                 $map[(int)$r->entry] = (int)$r->InventoryType;
@@ -361,7 +387,7 @@ class CharacterImporter
     private function insertCharacter(string $equipmentCache = ''): void
     {
         $b    = $this->data['basic'];
-        $name = substr($b['name'], 0, 12); // varchar(12)
+        $name = mb_substr($b['name'], 0, self::MAX_NAME_LENGTH, 'UTF-8');
 
         $race = $b['race'] ?? 1;
         $cls  = $b['class'] ?? 1;
@@ -616,6 +642,15 @@ class CharacterImporter
     {
         if (empty($items)) return;
 
+        // El cliente solo muestra 12 adjuntos por correo (MAX_MAIL_ITEMS en
+        // Mail.h), asi que troceamos.
+        foreach (array_chunk($items, self::MAX_MAIL_ITEMS) as $chunk) {
+            $this->mailOneBatch($chunk);
+        }
+    }
+
+    private function mailOneBatch(array $items): void
+    {
         $now    = time();
         $mailId = $this->insertMail(
             0,                    // sender = 0 (system)
@@ -626,6 +661,7 @@ class CharacterImporter
             $now + (30 * 24 * 3600)  // expire in 30 days
         );
 
+        $attached = 0;
         foreach ($items as $item) {
             $entry = (int)($item['entry'] ?? 0);
             if ($entry <= 0) continue;
@@ -639,12 +675,13 @@ class CharacterImporter
             $this->pdo->prepare(
                 'INSERT INTO `mail_items` (`mail_id`,`item_guid`,`receiver`) VALUES (?,?,?)'
             )->execute([$mailId, $iguid, $this->newGuid]);
+            $attached++;
         }
 
-        // Actualizar has_items = 1
-        $this->pdo->prepare(
-            'UPDATE `mail` SET `has_items` = 1 WHERE `id` = ?'
-        )->execute([$mailId]);
+        if ($attached > 0) {
+            $this->pdo->prepare('UPDATE `mail` SET `has_items` = 1 WHERE `id` = ?')
+                      ->execute([$mailId]);
+        }
     }
 
     private function insertMail(
@@ -655,15 +692,20 @@ class CharacterImporter
         int    $deliverTime,
         int    $expireTime
     ): int {
+        // mail.id no es AUTO_INCREMENT (el core lo genera en memoria con
+        // ObjectMgr::GenerateMailID), asi que lastInsertId() devolvia 0 y el
+        // segundo correo chocaba con la PK.
+        $mailId = (int) $this->pdo->query('SELECT MAX(`id`) FROM `mail` FOR UPDATE')->fetchColumn() + 1;
+
         $stmt = $this->pdo->prepare(
             'INSERT INTO `mail`
-             (`messageType`,`stationery`,`mailTemplateId`,`sender`,`receiver`,
+             (`id`,`messageType`,`stationery`,`mailTemplateId`,`sender`,`receiver`,
               `subject`,`body`,`has_items`,`expire_time`,`deliver_time`,
               `money`,`cod`,`checked`)
-             VALUES (0,41,0,?,?,?,?,0,?,?,0,0,0)'
+             VALUES (?,0,41,0,?,?,?,?,0,?,?,0,0,0)'
         );
-        $stmt->execute([$sender, $receiver, $subject, $body, $expireTime, $deliverTime]);
-        return (int) $this->pdo->lastInsertId();
+        $stmt->execute([$mailId, $sender, $receiver, $subject, $body, $expireTime, $deliverTime]);
+        return $mailId;
     }
 
     // ── Skills ───────────────────────────────────────────────
@@ -740,14 +782,17 @@ class CharacterImporter
         $raceId  = is_numeric($basic['race'] ?? '') ? (int)$basic['race'] : 1;
         $classId = is_numeric($basic['class'] ?? '') ? (int)$basic['class'] : 1;
 
+        if ($raceId < 1 || $classId < 1) return;
+
         $raceMask  = 1 << ($raceId - 1);
         $classMask = 1 << ($classId - 1);
 
         $skipConds = implode(' AND ', array_fill(0, count(self::SKIP_SKILL_COMMENT_PATTERNS), '`comment` NOT LIKE ?'));
 
+        $w = $this->worldDb();
         try {
             $stmt = $this->pdo->prepare(
-                "SELECT DISTINCT skill FROM acore_world.playercreateinfo_skills
+                "SELECT DISTINCT skill FROM {$w}.playercreateinfo_skills
                  WHERE (raceMask = 0 OR raceMask & {$raceMask})
                    AND (classMask = 0 OR classMask & {$classMask})
                    AND {$skipConds}"
@@ -899,9 +944,10 @@ class CharacterImporter
         $raceId  = is_numeric($basic['race'] ?? '') ? (int)$basic['race'] : 1;
         $classId = is_numeric($basic['class'] ?? '') ? (int)$basic['class'] : 1;
 
+        $w = $this->worldDb();
         try {
             $rows = $this->pdo->query(
-                "SELECT button, action, type FROM acore_world.playercreateinfo_action
+                "SELECT button, action, type FROM {$w}.playercreateinfo_action
                  WHERE race = {$raceId} AND class = {$classId}"
             )->fetchAll(PDO::FETCH_OBJ);
         } catch (Throwable) {
@@ -946,6 +992,12 @@ class CharacterImporter
 
     // ── Helpers privados de items ────────────────────────────
 
+    /** Nombre de la DB world, para las queries cross-database. */
+    private function worldDb(): string
+    {
+        return '`' . str_replace('`', '', DB_WORLD_NAME) . '`';
+    }
+
     private function isBlockedItem(int $entry): bool
     {
         return in_array($entry, BLOCKED_ITEMS, true);
@@ -962,23 +1014,29 @@ class CharacterImporter
         $gems = [(int)($item['gem1'] ?? 0), (int)($item['gem2'] ?? 0), (int)($item['gem3'] ?? 0)];
 
         // 18 enchant slots × 3 valores (id, duration, charges)
+        // Item.h: PERM=0, TEMP=1, SOCK=2..4. Las gemas van en 2,3,4; el 1 es
+        // el encantamiento temporal (aceites, piedras de afilar).
         $slots = array_fill(0, 18, '0 0 0');
-        if ($ench > 0) $slots[0] = "{$ench} 1 0";
+        if ($ench > 0) $slots[self::PERM_ENCHANTMENT_SLOT] = "{$ench} 1 0";
         for ($i = 0; $i < 3; $i++) {
-            if ($gems[$i] > 0) $slots[$i + 1] = "{$gems[$i]} 1 0";
+            if ($gems[$i] > 0) $slots[self::SOCK_ENCHANTMENT_SLOT + $i] = "{$gems[$i]} 1 0";
         }
         return implode(' ', $slots) . ' ';
     }
 
     private function insertItemInstance(int $iguid, int $entry, int $count, string $enchStr): void
     {
+        // Item::LoadFromDB solo corrige la durabilidad si supera MaxDurability,
+        // asi que un 0 se queda en 0 y el item entra roto.
+        $durability = $this->itemMaxDurability[$entry] ?? 0;
+
         $this->pdo->prepare(
             'INSERT INTO `item_instance`
              (`guid`,`owner_guid`,`itemEntry`,`creatorGuid`,`giftCreatorGuid`,
               `count`,`duration`,`charges`,`flags`,`enchantments`,`randomPropertyId`,
               `durability`,`playedTime`,`text`)
-             VALUES (?,?,?,0,0,?,0,\'\',0,?,0,0,0,\'\')'
-        )->execute([$iguid, $this->newGuid, $entry, $count, $enchStr]);
+             VALUES (?,?,?,0,0,?,0,\'\',0,?,0,?,0,\'\')'
+        )->execute([$iguid, $this->newGuid, $entry, $count, $enchStr, $durability]);
     }
 
     private function insertCharInventory(int $iguid, int $bag, int $slot): void
@@ -1032,7 +1090,8 @@ class CharacterImporter
         try {
             $d    = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
             $name = $d['basic']['name'] ?? '';
-            return (strlen($name) >= 2 && strlen($name) <= 16) ? $name : false;
+            $len  = mb_strlen((string) $name, 'UTF-8');
+            return ($len >= 2 && $len <= self::MAX_NAME_LENGTH) ? $name : false;
         } catch (Throwable) {
             return false;
         }

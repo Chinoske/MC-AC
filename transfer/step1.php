@@ -56,7 +56,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
 
-                $dump = decryptDump($encryptedData);
+                $dump = decodeDump($encryptedData);
                 if (empty($dump)) {
                     $dump = $rawContent; // Último fallback: contenido en bruto
                 }
@@ -72,9 +72,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if ($charLevel > 0 && !checkLevel($charLevel)) {
                         $error = t('level_fail');
                     } else {
-                        // Aplicar conversiones y filtros de items
-                        applyItemConversions($dump);
-                        removeBlockedItems($dump);
+                        // Las conversiones y la blacklist de items las aplica
+                        // CharacterImporter por campo. Hacerlo aqui sobre el
+                        // texto del dump cambiaba cualquier numero que
+                        // coincidiera con un entry convertible, incluido el oro.
 
                         // Guardar en sesión para paso 2
                         $_SESSION['transfer_dump']    = $dump;

@@ -1,7 +1,10 @@
 <?php
 /**
  * Migrador de Personajes — AzerothCore WotLK 3.3.5a
- * config.php — Configuración principal (edita solo esta sección)
+ * config.example.php — Plantilla de configuración.
+ *
+ * Copiala a config.php y edita tus credenciales ahi. config.php esta en
+ * .gitignore para que no acabe en el repo.
  *
  * PHP 8.0+ | MySQL 8 / MariaDB 10.5+ | AzerothCore última revisión
  */
@@ -65,13 +68,24 @@ define('MAX_LEVEL',           80);          // Nivel máximo permitido
 define('MAX_COPPER',  200_000_000);         // 200.000g en cobres
 define('MAX_HONOR',       75_000);          // Honor máximo transferible
 define('MAX_ARENA_POINTS',  5_000);         // Arena points máximo
-define('MIN_ACHIEVEMENTS',     50);         // Mínimo de logros (0 = desactivado)
-define('CHECK_ACHIEVEMENTS', true);         // Activar chequeo de logros
+
+// ═══════════════════════════════════════════════════════════════
+//  IMPORTAR CON EL WORLDSERVER ENCENDIDO
+//
+//  El import escribe GUIDs directo en la DB con MAX(guid)+1, pero el core
+//  reparte los suyos desde memoria: ObjectMgr::SetHighestGuids() los fija una
+//  sola vez al arrancar. Con el servidor arriba, el import se queda con GUIDs
+//  que el core ya tiene reservados y el siguiente personaje creado en el juego
+//  (o cada item looteado) choca contra la clave primaria.
+//
+//  Por eso el panel GM bloquea la aprobación mientras detecte el worldserver
+//  escuchando. Ponlo en true solo si sabes lo que haces.
+// ═══════════════════════════════════════════════════════════════
+define('ALLOW_IMPORT_WHILE_ONLINE', false);
 
 // ═══════════════════════════════════════════════════════════════
 //  SEGURIDAD
 // ═══════════════════════════════════════════════════════════════
-define('CAPTCHA_ENABLED',  false);          // Captcha en login
 define('TOKEN_NAME',   'csrf_token');       // Nombre del token CSRF en sesión
 define('SESSION_LIFETIME', 604_800);        // 7 días en segundos
 
