@@ -70,18 +70,21 @@ define('MAX_HONOR',       75_000);          // Honor máximo transferible
 define('MAX_ARENA_POINTS',  5_000);         // Arena points máximo
 
 // ═══════════════════════════════════════════════════════════════
-//  IMPORTAR CON EL WORLDSERVER ENCENDIDO
+//  CARPETA DE PDUMPS
 //
-//  El import escribe GUIDs directo en la DB con MAX(guid)+1, pero el core
-//  reparte los suyos desde memoria: ObjectMgr::SetHighestGuids() los fija una
-//  sola vez al arrancar. Con el servidor arriba, el import se queda con GUIDs
-//  que el core ya tiene reservados y el siguiente personaje creado en el juego
-//  (o cada item looteado) choca contra la clave primaria.
+//  Con el worldserver encendido el import se hace con `.pdump load` por SOAP:
+//  el migrador deja aquí un fichero y el core lo carga reasignando los GUID con
+//  sus propios generadores. Es la única forma correcta de importar en caliente,
+//  porque ObjectMgr::SetHighestGuids() fija esos generadores una sola vez al
+//  arrancar y escribir en la DB por debajo choca con lo que ya tiene reservado.
 //
-//  Por eso el panel GM bloquea la aprobación mientras detecte el worldserver
-//  escuchando. Ponlo en true solo si sabes lo que haces.
+//  **El fichero lo abre el worldserver, no la web.** Si están en máquinas
+//  distintas, apunta esto a una ruta que los dos vean con el mismo nombre. Con
+//  el servidor apagado no se usa: ahí el INSERT directo es seguro.
+//
+//  Vacío = storage/pdump/
 // ═══════════════════════════════════════════════════════════════
-define('ALLOW_IMPORT_WHILE_ONLINE', false);
+define('PDUMP_PATH', '');
 
 // ═══════════════════════════════════════════════════════════════
 //  SEGURIDAD

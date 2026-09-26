@@ -76,32 +76,40 @@ define('REALMS', [
 ]);
 ```
 
-### 3. Importa con el worldserver apagado
+### 3. Cómo se importa
 
-> ⚠ **La aprobación está bloqueada mientras el worldserver esté encendido.**
+El migrador no escribe personajes en la base de datos si puede evitarlo. Hay dos
+caminos y los elige solo, según si el worldserver del realm responde:
 
-`ObjectMgr::SetHighestGuids()` se ejecuta una sola vez al arrancar: el core lee
-`MAX(guid)` de `characters` e `item_instance` y a partir de ahí reparte GUIDs desde
-memoria. El import escribe directo en la DB con `MAX(guid)+1`, así que con el
-servidor arriba se queda con GUIDs que el core ya tiene reservados, y el siguiente
-personaje creado en el juego (o cada item looteado) choca contra la clave primaria.
-Lo mismo con `mail.id`, que tampoco es `AUTO_INCREMENT`.
+**Worldserver encendido → `.pdump load` por SOAP.** El migrador genera un fichero
+en el formato de `.pdump write` y le pide al core que lo cargue. `PlayerDumpReader`
+reasigna los GUID con sus propios generadores, refresca el `CharacterCache` y
+actualiza el contador de personajes de la cuenta. Todo lo hace el core, así que no
+hay nada que pueda colisionar.
 
-Por eso el flujo es:
+**Worldserver apagado → `INSERT` directo.** Ahí no hay con quién hablar, y como
+nadie más está repartiendo GUID el camino directo es seguro.
 
-1. Para el worldserver.
-2. Aprueba las transferencias pendientes en el panel GM.
-3. Arranca el worldserver. Al arrancar lee el caché de personajes de la DB, así que
-   el `.cache refresh` por SOAP ya no hace falta.
+Por qué importa: `ObjectMgr::SetHighestGuids()` se ejecuta una sola vez al
+arrancar. El core lee `MAX(guid)` de `characters` e `item_instance`, y a partir de
+ahí reparte GUID desde memoria. Escribir en la DB con `MAX(guid)+1` mientras el
+servidor corre significa quedarse con GUID que ya tiene reservados: el siguiente
+personaje creado en el juego, o cada item looteado, choca contra la clave
+primaria. Con `mail.id` pasa lo mismo, que tampoco es `AUTO_INCREMENT`.
 
-Mientras detecte el worldserver escuchando, el panel muestra un aviso y deja el
-botón **Aprobar** deshabilitado; `b_approve.php` lo rechaza igualmente si alguien
-manda el POST a mano. Si necesitas importar con el servidor arriba y asumes el
-riesgo, en `config.php`:
+El fichero del pdump **lo abre el worldserver, no la web**. Si están en máquinas
+distintas, apunta `PDUMP_PATH` a una ruta que los dos vean con el mismo nombre:
 
 ```php
-define('ALLOW_IMPORT_WHILE_ONLINE', true);
+define('PDUMP_PATH', '');   // vacío = storage/pdump/
 ```
+
+Se borra en cuanto el core termina de leerlo.
+
+> Un detalle del core: si el nombre ya está cogido, `.pdump load` importa el
+> personaje con otro nombre y lo marca para renombrar en el primer login. El
+> migrador no puede saber cuál le tocó, así que en ese caso da error y el GM
+> vuelve a intentarlo con otro nombre.
 
 ### 4. Worldserver — Habilitar SOAP
 
@@ -216,11 +224,17 @@ personaje insertado directo en la DB nunca recibe (por saltarse
 
 - **Nombre libre en el momento de insertar** — `characters.name` solo tiene un
   índice normal, no `UNIQUE`, así que la DB no impide duplicados. Entre que el
-  jugador confirma el nombre y el GM aprueba pueden pasar días, y el import lo
-  vuelve a comprobar antes de escribir.
+  jugador confirma el nombre y el GM aprueba pueden pasar días, y el import
+  directo lo vuelve a comprobar antes de escribir. Por la vía del pdump se ocupa
+  el core.
 
-> **Requiere `SOAP.Enabled = 1`** en `worldserver.conf` para el reenvío de items
-> por correo y el refresco de caché cuando importas con el servidor arriba.
+Todo esto se construye igual por los dos caminos: el importador llena un
+`ImportBuffer` con las filas, y luego se escriben como `INSERT` (`DirectWriter`) o
+se serializan a un pdump (`PdumpWriter`). Así no hay dos implementaciones que
+puedan separarse.
+
+> **Requiere `SOAP.Enabled = 1`** en `worldserver.conf` para importar con el
+> servidor encendido y para el reenvío de items por correo.
 
 > **Multi-realm**: el chequeo de GM (`User::gmLevel()` / `getGMLevel()`)
 > reconoce el `RealmID` de cada realm definido en `REALMS` (config.php), no
@@ -263,6 +277,9 @@ Migrador/
 │   ├── Input.php               ← Entrada segura POST/GET
 │   ├── Validation.php          ← Validación de formularios
 │   ├── Soap.php                ← Cliente SOAP para worldserver (urn:AC)
+│   ├── ImportBuffer.php        ← Filas del import, antes de escribirlas
+│   ├── DirectWriter.php        ← Las escribe con INSERT (servidor apagado)
+│   ├── PdumpWriter.php         ← Las serializa para `.pdump load`
 │   └── RateLimiter.php         ← Bloqueo temporal de login por IP
 │
 ├── transfer/
@@ -282,7 +299,8 @@ Migrador/
 │       └── chardump.toc
 │
 ├── tests/
-│   └── import_test.php         ← Test de integración contra MySQL
+│   ├── import_test.php         ← Test de integración contra MySQL
+│   └── PdumpParser.php         ← Réplica del parser del core, para validar
 │
 ├── sql/
 │   └── install.sql             ← Crear tablas (ejecutar una sola vez)
@@ -338,7 +356,7 @@ entry ──> api/icon.php ──> storage/icon_cache/<entry>.txt ──> CDN Wo
 | Paso 2 | Formulario de nombre | **Character Sheet visual** con íconos, calidades y stats |
 | Íconos | Ninguno | **DBC local** → caché de archivo → CDN WoWHead |
 | Formato de dump | SQL ejecutado con `exec()` | **JSON validado campo a campo** |
-| GUIDs | `MAX(guid)+1` a ciegas | **`FOR UPDATE`** + import bloqueado con el server arriba |
+| GUIDs | `MAX(guid)+1` a ciegas | **Los reparte el core** vía `.pdump load` |
 | Inventario | Todo a la mochila, resto a correo | **Cada item en su slot y dentro de su bolsa** |
 | Quests | No se importaban | **`character_queststatus`** validado contra `quest_template` |
 | Tests | Ninguno | **`tests/import_test.php`** contra MySQL |
@@ -362,8 +380,6 @@ entry ──> api/icon.php ──> storage/icon_cache/<entry>.txt ──> CDN Wo
   `.ini` — protecciones que antes solo existían en `.htaccess` y nunca se
   aplicaban en la práctica. El patrón de `/storage/` va con `/i`: en Windows el
   filesystem no distingue mayúsculas, así que `GET /Storage/…` servía el archivo.
-- **Aprobación bloqueada con el worldserver encendido** (`ALLOW_IMPORT_WHILE_ONLINE`)
-  — el chequeo está en `b_approve.php`, no solo en la UI.
 - **Los proxies del visor 3D y de íconos piden sesión** (`api/model_proxy.php`,
   `api/wotlk_display.php`, `api/icon.php`) y verifican el certificado TLS. Antes
   eran anónimos, escribían en disco y traían el contenido sin verificar el
@@ -416,6 +432,13 @@ comprueba el resultado fila a fila: posiciones del inventario, durabilidad,
 slots de gemas, skills, quests, troceado de correos, rollback de un dump
 inválido e integridad de GUIDs. Al terminar las borra; con `--keep` las deja
 para mirarlas.
+
+Para el pdump no hace falta un worldserver: `tests/PdumpParser.php` replica
+`GetTableName`, `ValidateFields` y `FindColumn` de `PlayerDump.cpp`, así que el
+test afirma que el core aceptaría el fichero y que cada columna se lee en la
+posición correcta. Eso es lo que hay que comprobar, porque el formato resuelve las
+columnas por índice y un fichero que parece bien puede hacer que el core lea el
+valor de al lado.
 
 No toca tus bases reales: de `acore_world` solo lee.
 

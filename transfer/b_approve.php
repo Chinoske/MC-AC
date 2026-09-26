@@ -35,23 +35,6 @@ if ($transferId <= 0 || $realmId <= 0) {
     exit;
 }
 
-// ── El worldserver del realm tiene que estar apagado ──────────
-//
-// El import reserva GUIDs con MAX(guid)+1, pero el core los reparte desde
-// memoria: ObjectMgr::SetHighestGuids() se ejecuta una sola vez al arrancar.
-// Con el servidor arriba nos quedamos con GUIDs que ya tiene reservados y el
-// siguiente personaje creado en el juego, o cada item looteado, choca contra la
-// PK de characters / item_instance. Con mail.id pasa lo mismo.
-//
-// defined(): config.php ya no viene en el repo, asi que una instalacion vieja
-// puede no tener la opcion.
-$allowOnline = defined('ALLOW_IMPORT_WHILE_ONLINE') && ALLOW_IMPORT_WHILE_ONLINE;
-if (!$allowOnline && Soap::isOnline($realmId)) {
-    Session::flash('error', sprintf(t('import_blocked_online'), getRealmName($realmId)));
-    header('Location: ../dashboard.php');
-    exit;
-}
-
 // La transferencia debe estar en estado pendiente (0)
 if (getTransferStatus($transferId) !== 0) {
     Session::flash('error', t('transfer_not_pending'));
@@ -95,7 +78,10 @@ if (empty($dumpData)) {
 $guid = applyCharacterDump($realmId, $dumpData, $targetAccountId);
 
 if ($guid <= 0) {
-    Session::flash('error', t('dump_apply_error') . ' — ' . t('check_server_logs'));
+    $msg = Soap::isOnline($realmId)
+        ? sprintf(t('import_pdump_failed'), getRealmName($realmId))
+        : t('dump_apply_error') . ' — ' . t('check_server_logs');
+    Session::flash('error', $msg);
     header('Location: ../dashboard.php');
     exit;
 }

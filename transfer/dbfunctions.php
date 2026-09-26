@@ -143,9 +143,15 @@ function getAccountTransfers(int $accountId, bool $asGM = false): array
 }
 
 /**
- * Aplica el dump del personaje en la DB del realm.
+ * Aplica el dump del personaje en el realm.
  * Solo acepta el formato JSON de chardump v2, que CharacterImporter valida
  * campo a campo.
+ *
+ * Con el worldserver encendido se le pasa un pdump por SOAP y el core hace el
+ * import: reasigna los GUID con sus generadores, refresca el CharacterCache y
+ * actualiza el contador de personajes. Con el servidor apagado no hay con quien
+ * hablar, y entonces el INSERT directo es seguro porque nadie mas esta
+ * repartiendo GUID.
  *
  * Devuelve el GUID del personaje importado (>0) o 0 en caso de error.
  */
@@ -160,14 +166,97 @@ function applyCharacterDump(int $realmId, string $dump, int $targetAccountId): i
         return 0;
     }
 
+    if (Soap::isOnline($realmId)) {
+        $guid = importViaPdump($realmId, $dump, $targetAccountId);
+        if ($guid > 0) {
+            return $guid;
+        }
+        error_log('[Migrador] El import por pdump falló; no se cae al INSERT directo '
+                . 'porque el worldserver está encendido y los GUID colisionarían.');
+        return 0;
+    }
+
+    return importDirect($realmId, $dump, $targetAccountId);
+}
+
+/**
+ * Import por `.pdump load`: genera el fichero, se lo pasa al worldserver por
+ * SOAP y busca el GUID que le asignó el core.
+ */
+function importViaPdump(int $realmId, string $dump, int $targetAccountId): int
+{
+    $file = null;
+    try {
+        $importer = new CharacterImporter($realmId, $targetAccountId);
+        $built    = $importer->buildPdump($dump);
+
+        $file = writePdumpFile($built['pdump']);
+        $out  = (new Soap($realmId))->pdumpLoad($file, $targetAccountId, $built['name']);
+
+        // El comando no devuelve el GUID, asi que lo buscamos por nombre. El core
+        // renombra el personaje si el nombre estaba cogido, y en ese caso no
+        // tenemos forma fiable de identificarlo: mejor avisar que adivinar.
+        $guid = (int) (getCharacterGuidByName($built['name'], $realmId) ?? 0);
+        if ($guid <= 0) {
+            error_log('[Migrador] .pdump load respondió "' . trim($out) . '" pero no aparece '
+                    . 'ningún personaje llamado ' . $built['name']
+                    . ' (¿nombre ya cogido y renombrado por el core?).');
+            return 0;
+        }
+        return $guid;
+    } catch (Throwable $e) {
+        error_log('[Migrador] import por pdump falló: ' . $e->getMessage());
+        return 0;
+    } finally {
+        if ($file !== null && is_file($file)) {
+            @unlink($file);
+        }
+    }
+}
+
+/** Import por INSERT directo. Solo con el worldserver apagado. */
+function importDirect(int $realmId, string $dump, int $targetAccountId): int
+{
     try {
         $importer = new CharacterImporter($realmId, $targetAccountId);
         $result   = $importer->import($dump);
-        refreshCharacterCache($realmId, $result['name']);
         return (int) $result['guid'];
     } catch (Throwable $e) {
         error_log('[Migrador] CharacterImporter error: ' . $e->getMessage());
         return 0;
+    }
+}
+
+/**
+ * Deja el pdump en disco y devuelve la ruta que hay que darle al worldserver.
+ * PDUMP_PATH existe porque el fichero lo abre el worldserver, no la web: si no
+ * comparten filesystem hay que apuntar a una ruta que los dos vean.
+ */
+function writePdumpFile(string $contents): string
+{
+    $dir = defined('PDUMP_PATH') && PDUMP_PATH !== '' ? PDUMP_PATH : STORAGE_PATH . '/pdump';
+    if (!is_dir($dir) && !@mkdir($dir, 0755, true) && !is_dir($dir)) {
+        throw new RuntimeException("No se pudo crear el directorio de pdumps: {$dir}");
+    }
+
+    $file = rtrim($dir, '/\\') . '/migrador_' . bin2hex(random_bytes(8)) . '.pdump';
+    if (@file_put_contents($file, $contents) === false) {
+        throw new RuntimeException("No se pudo escribir el pdump en {$file}");
+    }
+    return str_replace('\\', '/', $file);
+}
+
+/** GUID de un personaje por nombre, o null si no existe. */
+function getCharacterGuidByName(string $name, int $realmId): ?int
+{
+    try {
+        $row = DB::chars($realmId)->row(
+            'SELECT `guid` FROM `characters` WHERE `name` = ? ORDER BY `guid` DESC LIMIT 1',
+            [$name]
+        );
+        return $row ? (int) $row->guid : null;
+    } catch (Throwable) {
+        return null;
     }
 }
 
@@ -210,30 +299,6 @@ function cancelOrDenyTransfer(int $guid, int $realmId): void
 function getRealmName(int $realmId): string
 {
     return REALMS[$realmId]['name'] ?? "Realm #{$realmId}";
-}
-
-/**
- * Registra un personaje recien importado en el CharacterCache en memoria
- * del worldserver (GetCharacterCacheByGuid). Un INSERT directo en
- * `characters` nunca pasa por Player::Create() ni por el resto de los
- * puntos donde el core normalmente llama
- * sCharacterCache->AddCharacterCacheEntry() - sin esto, cualquier
- * SMSG_NAME_QUERY para ese GUID (chat, /who, nameplates, etc.) devuelve
- * "Unknown Entity" hasta que se reinicie el worldserver, aunque el
- * personaje cargue y juegue con normalidad.
- *
- * `.cache refresh` (cs_cache.cpp) es exactamente el comando GM que ya usa
- * AzerothCore para este mismo problema en su propia herramienta de
- * importación (.pdump load) - lo disparamos por SOAP en vez de duplicar
- * su lógica.
- */
-function refreshCharacterCache(int $realmId, string $charName): void
-{
-    try {
-        (new Soap($realmId))->command("cache refresh {$charName}");
-    } catch (Throwable $e) {
-        error_log("[Migrador] cache refresh falló para {$charName}: " . $e->getMessage());
-    }
 }
 
 /**

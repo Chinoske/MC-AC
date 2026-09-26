@@ -306,6 +306,152 @@ check('owner_guid coherente', (int) $col(
 check('ningun slot fuera de rango', (int) $col(
     'SELECT COUNT(*) FROM character_inventory WHERE bag = 0 AND (slot < 0 OR slot > 73)'), 0);
 
+note('=== 15. El pdump es lo que espera PlayerDumpReader ===');
+require_once __DIR__ . '/PdumpParser.php';
+
+$rowsBefore = (int) $col('SELECT COUNT(*) FROM characters');
+$built = (new CharacterImporter(1, 50))->buildPdump(json_encode($big));
+check('buildPdump no escribe en la DB', (int) $col('SELECT COUNT(*) FROM characters'), $rowsBefore);
+
+$parser = PdumpParser::fromPdo($pdo, ImportBuffer::TABLE_ORDER);
+$parsed = null;
+try {
+    $parsed = $parser->parse($built['pdump']);
+    check('el parser del core lo acepta', true, true);
+} catch (RuntimeException $e) {
+    check('el parser del core lo acepta', $e->getMessage(), 'sin errores');
+}
+
+if ($parsed !== null) {
+    $byTable = [];
+    foreach ($parsed as $r) {
+        $byTable[$r['table']][] = $r['values'];
+    }
+    printf("  %d lineas, tablas: %s\n", count($parsed), implode(', ', array_keys($byTable)));
+
+    check('hay una sola fila de characters', count($byTable['characters'] ?? []), 1);
+
+    // Lo que el core reescribe lo localiza por nombre de columna: si esas
+    // columnas no se leen bien, reasigna el GUID equivocado.
+    $ch = $byTable['characters'][0];
+    check('characters.guid legible', $ch['guid'], '1');
+    check('characters.name legible', $ch['name'], $big['basic']['name']);
+    check('characters.account legible', $ch['account'], '50');
+    check('characters.level legible', $ch['level'], (string) $big['basic']['level']);
+    check('characters.race legible', $ch['race'], (string) $big['basic']['race']);
+    check('characters.class legible', $ch['class'], (string) $big['basic']['class']);
+    check('exploredZones con 128 enteros', count(explode(' ', trim($ch['exploredZones']))), 128);
+
+    // Coherencia de los GUID locales: el core los remapea, pero si un item no
+    // existe en item_instance se queda con una referencia muerta.
+    $itemGuids = [];
+    foreach ($byTable['item_instance'] ?? [] as $r) {
+        $itemGuids[$r['guid']] = true;
+    }
+    $badInv = 0;
+    foreach ($byTable['character_inventory'] ?? [] as $r) {
+        if (!isset($itemGuids[$r['item']])) $badInv++;
+        if ($r['bag'] !== '0' && !isset($itemGuids[$r['bag']])) $badInv++;
+    }
+    check('character_inventory apunta a items del fichero', $badInv, 0);
+
+    $mailIds = [];
+    foreach ($byTable['mail'] ?? [] as $r) {
+        $mailIds[$r['id']] = true;
+    }
+    $badMail = 0;
+    foreach ($byTable['mail_items'] ?? [] as $r) {
+        if (!isset($mailIds[$r['mail_id']])) $badMail++;
+        if (!isset($itemGuids[$r['item_guid']])) $badMail++;
+    }
+    check('mail_items apunta a correos e items del fichero', $badMail, 0);
+
+    // owner_guid y receiver los reescribe el core con el guid nuevo, pero tienen
+    // que venir apuntando al personaje del fichero
+    $badOwner = 0;
+    foreach ($byTable['item_instance'] ?? [] as $r) {
+        if ($r['owner_guid'] !== '1') $badOwner++;
+    }
+    check('item_instance.owner_guid apunta al personaje', $badOwner, 0);
+
+    check('todos los GUID de item son unicos',
+        count($byTable['item_instance'] ?? []), count($itemGuids));
+}
+
+note('=== 16. Un valor con comilla no rompe el formato ===');
+$odd = $src;
+$odd['basic']['name'] = 'Comillas';
+$odd['bags'] = $odd['bank'] = [];
+$oddBuilt = (new CharacterImporter(1, 51))->buildPdump(json_encode($odd));
+try {
+    $parser->parse($oddBuilt['pdump']);
+    check('el fichero sigue siendo valido', true, true);
+} catch (RuntimeException $e) {
+    check('el fichero sigue siendo valido', $e->getMessage(), 'sin errores');
+}
+// una comilla escapada dentro de un valor no debe descolocar las posiciones
+$fake = new PdumpParser(['characters' => ['guid', 'name', 'level']]);
+$probe = "INSERT INTO `characters` (`guid`, `name`, `level`) VALUES ('7', 'O\\'Brien', '80');";
+check('valor con comilla escapada: guid', $fake->column('characters', $probe, 'guid'), '7');
+check('valor con comilla escapada: name', $fake->column('characters', $probe, 'name'), "O\\'Brien");
+check('valor con comilla escapada: level', $fake->column('characters', $probe, 'level'), '80');
+
+note('=== 17. Fichero y comando de .pdump load ===');
+require_once TRANSFER_PATH . '/dbfunctions.php';
+
+$file = writePdumpFile($built['pdump']);
+check('el fichero se escribe', is_file($file), true);
+check('el contenido es el generado', md5((string) file_get_contents($file)), md5($built['pdump']));
+check('la ruta va con barras normales', str_contains($file, chr(92)), false);
+printf("  %s (%d bytes)\n", $file, filesize($file));
+
+$cmd = Soap::pdumpCommand($file, 50, $built['name']);
+printf("  comando: .%s\n", $cmd);
+check('empieza por pdump load', str_starts_with($cmd, 'pdump load "'), true);
+check('lleva la cuenta', str_contains($cmd, ' 50 '), true);
+check('acaba con el nombre', str_ends_with($cmd, ' ' . $built['name']), true);
+check('la ruta va entre comillas', substr_count($cmd, '"'), 2);
+@unlink($file);
+check('se limpia el fichero', is_file($file), false);
+
+note('=== 18. Eleccion de via segun el worldserver ===');
+// En este entorno el worldserver del realm de pruebas esta apagado, asi que
+// applyCharacterDump tiene que ir por el INSERT directo.
+check('worldserver apagado', Soap::isOnline(1), false);
+$viaDirect = $src;
+$viaDirect['basic']['name'] = 'Directa';
+$before = (int) $col('SELECT COUNT(*) FROM characters');
+$g = applyCharacterDump(1, json_encode($viaDirect), 52);
+check('applyCharacterDump importa', $g > 0, true);
+check('se creo el personaje', (int) $col('SELECT COUNT(*) FROM characters'), $before + 1);
+check('y es el que dice', (string) $col('SELECT name FROM characters WHERE guid = ?', [$g]), 'Directa');
+
+note('=== 19. Ninguna columna NOT NULL sale como NULL ===');
+// FixNULLfields convierte 'NULL' en NULL de verdad, asi que una columna NOT NULL
+// que salga asi tumba el INSERT dentro del core. characters.taximask es el caso
+// tipico: es NOT NULL y sin default.
+$notNull = [];
+foreach (ImportBuffer::TABLE_ORDER as $t) {
+    foreach ($pdo->query('DESC `' . $t . '`')->fetchAll(PDO::FETCH_OBJ) as $r) {
+        if (strtoupper((string) $r->Null) === 'NO') {
+            $notNull[$t][] = (string) $r->Field;
+        }
+    }
+}
+$offenders = [];
+foreach ($parsed ?? [] as $r) {
+    foreach ($notNull[$r['table']] ?? [] as $c) {
+        if ($r['values'][$c] === 'NULL') {
+            $offenders[$r['table'] . '.' . $c] = true;
+        }
+    }
+}
+if ($offenders) {
+    printf("  columnas afectadas: %s\n", implode(', ', array_keys($offenders)));
+}
+check('ninguna NOT NULL vale NULL', count($offenders), 0);
+check('characters.taximask no es NULL', $ch['taximask'] ?? 'x', '');
+
 } finally {
     if ($keep) {
         echo "\nDBs de prueba conservadas (--keep): " . TEST_AUTH . ', ' . TEST_CHARS . "\n";

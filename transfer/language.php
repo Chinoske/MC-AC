@@ -1191,33 +1191,15 @@ $LANG = array_replace_recursive($LANG, [
     ],
 ]);
 
-// Worldserver arriba: el import chocaria con los GUID que el core tiene
-// reservados en memoria, asi que la aprobacion queda bloqueada.
+// El import en caliente lo hace el core con `.pdump load`; si eso falla no
+// hay plan B seguro mientras el worldserver reparta GUID.
 $LANG = array_replace_recursive($LANG, [
-    'es' => [
-        'warn_worldserver_online' => "El worldserver de %s esta encendido: la aprobacion queda bloqueada hasta que lo apagues, porque el import chocaria con los GUID que el servidor tiene reservados en memoria.",
-        'import_blocked_online'   => "Aprobacion bloqueada: el worldserver de %s esta encendido. Apagalo e intentalo de nuevo, o pon ALLOW_IMPORT_WHILE_ONLINE en true si sabes lo que haces.",
-    ],
-    'en' => [
-        'warn_worldserver_online' => "The worldserver for %s is running: approval stays blocked until you shut it down, because the import would clash with the GUIDs the server has reserved in memory.",
-        'import_blocked_online'   => "Approval blocked: the worldserver for %s is running. Shut it down and try again, or set ALLOW_IMPORT_WHILE_ONLINE to true if you know what you are doing.",
-    ],
-    'fr' => [
-        'warn_worldserver_online' => "Le worldserver de %s est demarre : l'approbation reste bloquee jusqu'a son arret, car l'import entrerait en conflit avec les GUID reserves en memoire par le serveur.",
-        'import_blocked_online'   => "Approbation bloquee : le worldserver de %s est demarre. Arretez-le et reessayez, ou mettez ALLOW_IMPORT_WHILE_ONLINE a true si vous savez ce que vous faites.",
-    ],
-    'de' => [
-        'warn_worldserver_online' => "Der Worldserver von %s lauft: die Genehmigung bleibt blockiert, bis du ihn stoppst, denn der Import wurde mit den im Speicher reservierten GUIDs kollidieren.",
-        'import_blocked_online'   => "Genehmigung blockiert: der Worldserver von %s lauft. Stoppe ihn und versuche es erneut, oder setze ALLOW_IMPORT_WHILE_ONLINE auf true, wenn du weisst was du tust.",
-    ],
-    'ru' => [
-        'warn_worldserver_online' => "Worldserver realm %s запущен: одобрение заблокировано, пока вы его не остановите, иначе импорт столкнется с GUID, зарезервированными сервером в памяти.",
-        'import_blocked_online'   => "Одобрение заблокировано: worldserver realm %s запущен. Остановите его и попробуйте снова, либо включите ALLOW_IMPORT_WHILE_ONLINE, если понимаете последствия.",
-    ],
-    'pt' => [
-        'warn_worldserver_online' => "O worldserver de %s esta ligado: a aprovacao fica bloqueada ate voce desliga-lo, porque o import colidiria com os GUIDs reservados pelo servidor na memoria.",
-        'import_blocked_online'   => "Aprovacao bloqueada: o worldserver de %s esta ligado. Desligue-o e tente novamente, ou defina ALLOW_IMPORT_WHILE_ONLINE como true se sabe o que faz.",
-    ],
+    'es' => ['import_pdump_failed' => "No se pudo importar por pdump en %s. Mira el log del worldserver y del migrador: con el servidor encendido no se escribe en la DB a mano porque los GUID chocarian."],
+    'en' => ['import_pdump_failed' => "The pdump import failed on %s. Check the worldserver and migrador logs: with the server running we never write to the DB by hand, the GUIDs would clash."],
+    'fr' => ['import_pdump_failed' => "L'import par pdump a echoue sur %s. Regardez les logs du worldserver et du migrador : serveur demarre, on n'ecrit jamais dans la DB a la main, les GUID entreraient en conflit."],
+    'de' => ['import_pdump_failed' => "Der pdump-Import auf %s ist fehlgeschlagen. Schau in die Logs von Worldserver und Migrador: bei laufendem Server schreiben wir nie direkt in die DB, die GUIDs wurden kollidieren."],
+    'ru' => ['import_pdump_failed' => "Импорт через pdump на %s не удался. Проверьте логи worldserver и migrador: при запущенном сервере мы не пишем в базу напрямую, GUID конфликтовали бы."],
+    'pt' => ['import_pdump_failed' => "O import por pdump falhou em %s. Veja os logs do worldserver e do migrador: com o servidor ligado nunca escrevemos na DB a mao, os GUIDs colidiriam."],
 ]);
 
 /** Idioma activo: el elegido en sesión, o DEFAULT_LANG si no eligió ninguno. */
@@ -1246,7 +1228,7 @@ function t(string $key): string
  */
 /**
  * Traduccion lista para usar dentro de un atributo onsubmit/onclick.
- * Devuelve el literal JS con sus comillas: confirm(<?= jsText('k') ?>).
+ * Devuelve el literal JS con sus comillas, listo para meter en confirm().
  * Un apostrofe en la traduccion (fr: "l'annulation") cerraba la cadena JS y
  * el handler no compilaba, asi que el form se enviaba sin confirmar.
  */
