@@ -30,6 +30,13 @@ if ($entry <= 0 || $entry > 200000) {
 
 require_once dirname(__DIR__) . '/config.php';
 
+// Escribe un fichero por entry, asi que anonimo era una via para crear miles
+// de ficheros a peticiones.
+if (!(new User())->isLoggedIn()) {
+    http_response_code(403);
+    exit;
+}
+
 $cacheDir  = STORAGE_PATH . '/icon_cache/';
 if (!is_dir($cacheDir)) @mkdir($cacheDir, 0755, true);
 
@@ -118,7 +125,12 @@ function buildDBCIndex(string $dbcPath): array
     if (!$fh) return [];
 
     // Cabecera (20 bytes): magic(4) + recordCount(4) + fieldCount(4) + recordSize(4) + stringBlockSize(4)
-    $rawHdr   = fread($fh, 20);
+    $rawHdr = fread($fh, 20);
+    if ($rawHdr === false || strlen($rawHdr) < 20 || substr($rawHdr, 0, 4) !== 'WDBC') {
+        fclose($fh);
+        error_log('[icon.php] No es un DBC valido: ' . $dbcPath);
+        return [];
+    }
     $hdrVals  = array_values(unpack('V5', $rawHdr)); // 0-indexed tras array_values
     $records  = $hdrVals[1];
     $fields   = $hdrVals[2];
@@ -134,8 +146,15 @@ function buildDBCIndex(string $dbcPath): array
 
     // Leer datos y bloque de strings
     $data     = fread($fh, $records * $recSize);
-    $strBlock = fread($fh, $strSize);
+    $strBlock = $strSize > 0 ? fread($fh, $strSize) : '';
     fclose($fh);
+
+    if ($data === false || strlen($data) < $records * $recSize) {
+        error_log('[icon.php] DBC truncado: ' . $dbcPath);
+        return [];
+    }
+    $strBlock = (string) $strBlock;
+    $strSize  = strlen($strBlock);
 
     // Offset del campo InventoryIcon[0] dentro de cada record:
     // field[5] → byte offset = 5 × 4 = 20

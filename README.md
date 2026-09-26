@@ -189,6 +189,14 @@ personaje insertado directo en la DB nunca recibe (por saltarse
 - **`exploredZones`/`knownTitles` con el formato correcto** — el core
   exige exactamente 128 y 6 enteros respectivamente o descarta el campo
   entero como inválido; un `NULL` directo generaba warnings en cada login.
+- **Cada item vuelve a su sitio** — el dump trae la posición original (mochila,
+  bolsa equipada N, banco), así que los items entran en su slot y **dentro de sus
+  bolsas**, no amontonados en la mochila. Un personaje con 4 bolsas de 32 tiene
+  144 huecos en vez de 16, y solo lo que pase de ahí va por correo.
+- **Quests en curso** — `character_queststatus` con las del log: completas con
+  status 1, en curso con 3. El addon no exporta el progreso de cada objetivo, así
+  que las incompletas empiezan con los contadores a cero. Los ids se validan
+  contra `quest_template`.
 - **Items con su durabilidad completa** — `item_instance.durability` se rellena con
   el `MaxDurability` de `item_template`. `Item::LoadFromDB` solo corrige la
   durabilidad si supera el máximo, así que un 0 se quedaba en 0 y el personaje
@@ -206,8 +214,13 @@ personaje insertado directo en la DB nunca recibe (por saltarse
   alguien reinicie el worldserver (el core solo actualiza ese caché en
   memoria en las creaciones normales de personaje).
 
-> **Requiere `SOAP.Enabled = 1`** en `worldserver.conf` para el refresco de
-> caché, el reenvío de items por correo y el reset de talentos por comando.
+- **Nombre libre en el momento de insertar** — `characters.name` solo tiene un
+  índice normal, no `UNIQUE`, así que la DB no impide duplicados. Entre que el
+  jugador confirma el nombre y el GM aprueba pueden pasar días, y el import lo
+  vuelve a comprobar antes de escribir.
+
+> **Requiere `SOAP.Enabled = 1`** en `worldserver.conf` para el reenvío de items
+> por correo y el refresco de caché cuando importas con el servidor arriba.
 
 > **Multi-realm**: el chequeo de GM (`User::gmLevel()` / `getGMLevel()`)
 > reconoce el `RealmID` de cada realm definido en `REALMS` (config.php), no
@@ -268,6 +281,9 @@ Migrador/
 │       ├── chardump.lua
 │       └── chardump.toc
 │
+├── tests/
+│   └── import_test.php         ← Test de integración contra MySQL
+│
 ├── sql/
 │   └── install.sql             ← Crear tablas (ejecutar una sola vez)
 │
@@ -323,6 +339,9 @@ entry ──> api/icon.php ──> storage/icon_cache/<entry>.txt ──> CDN Wo
 | Íconos | Ninguno | **DBC local** → caché de archivo → CDN WoWHead |
 | Formato de dump | SQL ejecutado con `exec()` | **JSON validado campo a campo** |
 | GUIDs | `MAX(guid)+1` a ciegas | **`FOR UPDATE`** + import bloqueado con el server arriba |
+| Inventario | Todo a la mochila, resto a correo | **Cada item en su slot y dentro de su bolsa** |
+| Quests | No se importaban | **`character_queststatus`** validado contra `quest_template` |
+| Tests | Ninguno | **`tests/import_test.php`** contra MySQL |
 
 ---
 
@@ -345,6 +364,18 @@ entry ──> api/icon.php ──> storage/icon_cache/<entry>.txt ──> CDN Wo
   filesystem no distingue mayúsculas, así que `GET /Storage/…` servía el archivo.
 - **Aprobación bloqueada con el worldserver encendido** (`ALLOW_IMPORT_WHILE_ONLINE`)
   — el chequeo está en `b_approve.php`, no solo en la UI.
+- **Los proxies del visor 3D y de íconos piden sesión** (`api/model_proxy.php`,
+  `api/wotlk_display.php`, `api/icon.php`) y verifican el certificado TLS. Antes
+  eran anónimos, escribían en disco y traían el contenido sin verificar el
+  certificado.
+- **El reenvío de items saca el personaje de la transferencia**, no del POST: un
+  GM podía reenviarse por correo los items de cualquier personaje del servidor.
+- **Redirecciones sin `Host`** — el login y el paso 2 construían la URL de destino
+  con `$_SERVER['HTTP_HOST']`, que elige el cliente, y el login además lo
+  interpolaba sin escapar dentro de un `<script>`. Ahora son rutas relativas.
+- **`set_lang.php`** rechaza también las rutas con barra invertida: los navegadores
+  la tratan como una barra normal, así que `/\evil.com` acababa siendo un redirect
+  externo.
 - **Solo se aceptan dumps JSON (chardump v2)**, que `CharacterImporter` reconstruye
   campo a campo. El formato v1 pasaba el dump del jugador a `PDO::exec()` troceado
   por `;`, y el "cifrado" del addon es un base64 invertido: cualquiera podía
@@ -370,6 +401,23 @@ interfaz como el vocabulario del preview de personaje (stats, clases/razas,
 tipos de daño, sockets, triggers de hechizo, nombres de slot de equipo).  
 Cambia `DEFAULT_LANG` en `config.php` para ajustar el idioma por defecto
 cuando el jugador no eligió ninguno.
+
+---
+
+## 🧪 Test de integración
+
+```bash
+php tests/import_test.php
+```
+
+Crea dos bases de prueba copiando el esquema de tu instalación
+(`mcac_test_auth` / `mcac_test_chars`), importa los dumps de `storage/` y
+comprueba el resultado fila a fila: posiciones del inventario, durabilidad,
+slots de gemas, skills, quests, troceado de correos, rollback de un dump
+inválido e integridad de GUIDs. Al terminar las borra; con `--keep` las deja
+para mirarlas.
+
+No toca tus bases reales: de `acore_world` solo lee.
 
 ---
 

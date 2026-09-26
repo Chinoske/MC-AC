@@ -7,6 +7,11 @@ class DB
 {
     /** @var array<string, self> */
     private static array $instances = [];
+
+    /** Nombres de DB que sustituyen a los de config.php (solo tests). */
+    private static ?string $authOverride  = null;
+    private static ?string $charsOverride = null;
+
     private PDO $pdo;
 
     private function __construct(
@@ -24,6 +29,20 @@ class DB
         ]);
     }
 
+    /**
+     * Redirige auth y chars a otras bases, para tests/import_test.php.
+     * Solo por consola: en web no tiene ningun uso legitimo.
+     */
+    public static function overrideForTests(string $authDb, string $charsDb): void
+    {
+        if (PHP_SAPI !== 'cli') {
+            throw new RuntimeException('overrideForTests solo se puede usar por consola.');
+        }
+        self::$authOverride  = $authDb;
+        self::$charsOverride = $charsDb;
+        self::$instances     = [];
+    }
+
     /** Conexión a la base de datos Auth (acore_auth) */
     public static function auth(): self
     {
@@ -31,7 +50,7 @@ class DB
             self::$instances['auth'] = new self(
                 DB_AUTH_HOST, DB_AUTH_PORT,
                 DB_AUTH_USER, DB_AUTH_PASS,
-                DB_AUTH_NAME
+                self::$authOverride ?? DB_AUTH_NAME
             );
         }
         return self::$instances['auth'];
@@ -60,7 +79,7 @@ class DB
             self::$instances[$key] = new self(
                 $r['db_host'], $r['db_port'],
                 $r['db_user'], $r['db_pass'],
-                $r['db_name']
+                self::$charsOverride ?? $r['db_name']
             );
         }
         return self::$instances[$key];

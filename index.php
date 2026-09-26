@@ -30,17 +30,9 @@ if ($lockedMinutes !== null) {
             if ($u->login(Input::getRaw('username'), Input::getRaw('password'))) {
                 RateLimiter::clear();
                 Token::invalidate();
-                $base = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' ? 'https' : 'http')
-                      . '://' . $_SERVER['HTTP_HOST']
-                      . rtrim(dirname($_SERVER['SCRIPT_NAME']), '/\\');
-                $dest = $base . '/dashboard.php';
-                header("Location: $dest");
-                echo '<!DOCTYPE html><html><head>';
-                echo "<meta http-equiv=\"refresh\" content=\"0;url={$dest}\">";
-                echo '</head><body>';
-                echo "<script>window.location.href=\"{$dest}\";</script>";
-                echo "<p>" . t('redirecting') . " <a href=\"{$dest}\">" . t('redirect_link') . "</a></p>";
-                echo '</body></html>';
+                // Location relativo: el Host lo elige el cliente, y antes se
+                // interpolaba sin escapar en un <script> y en un href.
+                header('Location: dashboard.php', true, 303);
                 exit;
             } else {
                 RateLimiter::recordFailure();

@@ -36,6 +36,14 @@ class CharacterImporter
     // characters.name es varchar(12)
     private const MAX_NAME_LENGTH = 12;
 
+    // Player.h: InventorySlots / InventoryPackSlots / BankItemSlots.
+    // Los *_END del core son exclusivos; aqui guardamos el ultimo slot valido.
+    private const BAG_SLOT_START  = 19;   // 19-22: contenedores de bolsas
+    private const BACKPACK_START  = 23;   // 23-38: mochila
+    private const BACKPACK_END    = 38;
+    private const BANK_START      = 39;   // 39-66: banco directo
+    private const BANK_END        = 66;
+
     // Item.h: EnchantmentSlot
     private const PERM_ENCHANTMENT_SLOT = 0;
     private const SOCK_ENCHANTMENT_SLOT = 2;
@@ -157,6 +165,7 @@ class CharacterImporter
             $this->insertReputations();
             $this->insertHomebind();
             $this->insertActionBar();
+            $this->insertQuests();
 
             // Enviar por correo los items que no cupieron
             $allExcess = array_merge($excessInventory, $excessBank);
@@ -240,6 +249,9 @@ class CharacterImporter
     /** @var array<int,int> entry → item_template.MaxDurability */
     private array $itemMaxDurability = [];
 
+    /** @var array<int,int> entry → item_template.ContainerSlots (capacidad de una bolsa) */
+    private array $itemContainerSlots = [];
+
     /**
      * Carga en $validEntries todos los entries de equipped/bags/bank que
      * realmente existen en item_template. Un dump manipulado (o
@@ -264,11 +276,13 @@ class CharacterImporter
             $w    = $this->worldDb();
             $in   = implode(',', $entries);
             $rows = $this->pdo->query(
-                "SELECT entry, MaxDurability FROM {$w}.item_template WHERE entry IN ({$in})"
+                "SELECT entry, MaxDurability, ContainerSlots
+                   FROM {$w}.item_template WHERE entry IN ({$in})"
             )->fetchAll(PDO::FETCH_OBJ);
             foreach ($rows as $r) {
-                $this->validEntries[(int)$r->entry]      = true;
-                $this->itemMaxDurability[(int)$r->entry] = (int)$r->MaxDurability;
+                $this->validEntries[(int)$r->entry]       = true;
+                $this->itemMaxDurability[(int)$r->entry]  = (int)$r->MaxDurability;
+                $this->itemContainerSlots[(int)$r->entry] = (int)$r->ContainerSlots;
             }
         } catch (Throwable $e) {
             // Si el lookup falla, no bloqueamos el import completo por esto -
@@ -389,6 +403,15 @@ class CharacterImporter
         $b    = $this->data['basic'];
         $name = mb_substr($b['name'], 0, self::MAX_NAME_LENGTH, 'UTF-8');
 
+        // characters.name solo tiene un indice normal, no UNIQUE, asi que la DB
+        // no impide dos personajes con el mismo nombre. step2 ya lo comprueba,
+        // pero entre eso y la aprobacion del GM pueden pasar dias.
+        $taken = $this->pdo->prepare('SELECT 1 FROM `characters` WHERE `name` = ? LIMIT 1 FOR UPDATE');
+        $taken->execute([$name]);
+        if ($taken->fetchColumn() !== false) {
+            throw new RuntimeException("El nombre '{$name}' ya está en uso en este realm.");
+        }
+
         $race = $b['race'] ?? 1;
         $cls  = $b['class'] ?? 1;
 
@@ -402,7 +425,7 @@ class CharacterImporter
         $honor    = min((int)($b['honor']     ?? 0), MAX_HONOR);
         $arenapts = min((int)($b['arena_pts'] ?? 0), MAX_ARENA_POINTS);
         $level    = max(1, min((int)($b['level'] ?? 1), MAX_LEVEL));
-        $xp       = (int)($b['xp'] ?? 0);
+        $xp       = max(0, (int)($b['xp'] ?? 0));
 
         // Zona de spawn: 1519 = Stormwind, 1637 = Orgrimmar
         $zone = $faction === 1 ? 1637 : 1519;
@@ -478,164 +501,245 @@ class CharacterImporter
         ]);
     }
 
-    // ── Inventario equipado + bolsas ─────────────────────────
+    // ── Inventario: equipo, bolsas equipadas y su contenido ──────
     //
-    // Slots AzerothCore en character_inventory:
-    //   bag=0, slot  0-18  → equip (head, neck, …, tabard)
-    //   bag=0, slot 19-22  → slots de bolsas equipadas
-    //   bag=0, slot 23-38  → mochila principal (16 slots)
-    //   bag=0, slot 39-66  → banco (28 slots directos)
+    // Posiciones de character_inventory (Player.h):
+    //   bag = 0  -> slot es una posicion absoluta del personaje
+    //               0-18  equipo
+    //               19-22 contenedores de bolsas equipadas
+    //               23-38 mochila (16 slots)
+    //               39-66 banco directo (28 slots)
+    //   bag != 0 -> es el GUID del item contenedor y slot es el indice dentro
+    //               de la bolsa, 0-based (Player::_LoadInventory)
     //
-    // La API Lua usa base-1: equipped slot 1=head → DB slot 0.
-    // Bag 0 (mochila) slot 1-16 → DB slot 23-38.
+    // El dump trae la posicion original de cada item (bag 0 = mochila,
+    // 1-4 = bolsa equipada N, -1 = banco directo, 5-10 = bolsa del banco), asi
+    // que la respetamos en vez de amontonar todo en la mochila. Lo que no cabe
+    // va por correo.
     //
-    // @return array Items que NO cupieron (para enviar por correo)
+    // @return array Items que NO cupieron
+
+    /** @var array<int,true> posiciones absolutas ya ocupadas (bag = 0) */
+    private array $usedRootSlots = [];
+
+    /** @var array<int,array{guid:int,slots:int,used:array<int,true>}> dbSlot 19-22 => bolsa */
+    private array $equippedBags = [];
 
     private function insertInventory(): array
     {
         $equipped = $this->data['equipped'] ?? [];
-        $bags     = $this->data['bags']     ?? [];
-        $excess   = [];
+        $pending  = [];
 
-        // ── 1) Items equipados ───────────────────────────────
+        // ── 1) Equipo y bolsas equipadas (Lua 1-23 -> DB 0-22) ───
         //
-        // Validamos el InventoryType de cada item contra su slot DBC.
-        // Items con InventoryType incorrecto se redirigen a la mochila
-        // (o a correo si tampoco caben).
-        //
-        // Usamos $this->equippedItemMeta ya cargado por buildEquipmentCache().
-        // Si algún entry no estaba en el meta (p.ej. entries nuevos no en
-        // el cache), hacemos una carga lazy.
-
-        // Recopilar entries que no estén en el meta aún
-        $missingEntries = [];
-        foreach ($equipped as $item) {
-            $entry = $this->convertItem((int)($item['entry'] ?? 0));
-            if ($entry > 0 && !isset($this->equippedItemMeta[$entry])) {
-                $missingEntries[] = $entry;
-            }
-        }
-        if (!empty($missingEntries)) {
-            $extraTypes = $this->loadInventoryTypes($missingEntries);
-            foreach ($extraTypes as $e => $invType) {
-                if (!isset($this->equippedItemMeta[$e])) {
-                    $obj               = new stdClass();
-                    $obj->InventoryType = $invType;
-                    $obj->displayid    = 0;
-                    $this->equippedItemMeta[$e] = $obj;
-                }
-            }
-        }
-
-        $backpackSlot = 23; // mochila principal: DB slots 23-38 (16 slots)
+        // Las bolsas tienen que quedar insertadas antes que su contenido: el
+        // core ordena por bag,slot al cargar y necesita el contenedor ya
+        // colocado para meterle los items.
+        $this->loadEquippedMeta($equipped);
 
         foreach ($equipped as $item) {
             $entry = (int)($item['entry'] ?? 0);
-            if ($entry <= 0) continue;
-            if ($this->isBlockedItem($entry)) continue;
+            if ($entry <= 0 || $this->isBlockedItem($entry)) continue;
             $entry = $this->convertItem($entry);
             if (!$this->isValidEntry($entry)) {
                 error_log("[Migrador] Item entry={$entry} no existe en item_template, omitido (equipped).");
                 continue;
             }
 
-            $luaSlot = (int)($item['slot'] ?? 1);
-            $dbSlot  = $luaSlot - 1;  // Lua 1-23 → DB 0-22
+            $dbSlot = (int)($item['slot'] ?? 1) - 1;   // Lua 1-23 -> DB 0-22
             if ($dbSlot < 0 || $dbSlot > 22) continue;
 
-            $count   = max(1, (int)($item['count'] ?? 1));
-            $enchStr = $this->buildEnchStr($item);
-
-            // Validar InventoryType contra el slot DBC (incluye bolsas en slots 19-22)
             $meta    = $this->equippedItemMeta[$entry] ?? null;
             $invType = $meta ? (int)$meta->InventoryType : 0;
-            $slotOk  = $this->isValidForSlot($dbSlot, $invType);
 
-            if ($slotOk) {
-                // Item correcto para este slot → insertar como equipado o bolsa
-                $iguid = $this->nextItemGuid();
-                $this->insertItemInstance($iguid, $entry, $count, $enchStr);
-                $this->insertCharInventory($iguid, 0, $dbSlot);
-            } else {
-                // InventoryType no coincide con el slot → redirigir a mochila
-                error_log("[Migrador] Item entry={$entry} invType={$invType} no válido para slot DB={$dbSlot}, moviendo a mochila.");
-                if ($backpackSlot <= 38) {
-                    $iguid = $this->nextItemGuid();
-                    $this->insertItemInstance($iguid, $entry, $count, $enchStr);
-                    $this->insertCharInventory($iguid, 0, $backpackSlot);
-                    $backpackSlot++;
-                } else {
-                    $excess[] = array_merge($item, ['entry' => $entry]);
-                }
+            if (!$this->isValidForSlot($dbSlot, $invType) || isset($this->usedRootSlots[$dbSlot])) {
+                // InventoryType que no corresponde al slot, o dos items
+                // peleando por el mismo: se recoloca mas abajo.
+                error_log("[Migrador] Item entry={$entry} invType={$invType} no valido para slot DB={$dbSlot}, se recoloca.");
+                $pending[] = array_merge($item, ['entry' => $entry]);
+                continue;
+            }
+
+            $iguid = $this->nextItemGuid();
+            $this->insertItemInstance($iguid, $entry, max(1, (int)($item['count'] ?? 1)), $this->buildEnchStr($item));
+            $this->insertCharInventory($iguid, 0, $dbSlot);
+            $this->usedRootSlots[$dbSlot] = true;
+
+            // Bolsa equipada: nos guardamos su guid y capacidad para su contenido
+            if ($dbSlot >= self::BAG_SLOT_START && $dbSlot < self::BAG_SLOT_START + 4) {
+                $this->equippedBags[$dbSlot] = [
+                    'guid'  => $iguid,
+                    'slots' => (int)($this->itemContainerSlots[$entry] ?? 0),
+                    'used'  => [],
+                ];
             }
         }
 
-        // ── 2) Items en bolsas (bags 0-4) ───────────────────
-        // Intentamos meter los primeros items en la mochila principal (23-38).
-        // El resto va a correo.
-        foreach ($bags as $item) {
+        // ── 2) Contenido de la mochila y de las bolsas ───────────
+        foreach (($this->data['bags'] ?? []) as $item) {
             $entry = (int)($item['entry'] ?? 0);
-            if ($entry <= 0) continue;
-            if ($this->isBlockedItem($entry)) continue;
+            if ($entry <= 0 || $this->isBlockedItem($entry)) continue;
             $entry = $this->convertItem($entry);
             if (!$this->isValidEntry($entry)) {
                 error_log("[Migrador] Item entry={$entry} no existe en item_template, omitido (bags).");
                 continue;
             }
+            $item['entry'] = $entry;
 
-            $count   = max(1, (int)($item['count'] ?? 1));
-            $enchStr = $this->buildEnchStr($item);
+            $srcBag  = (int)($item['bag']  ?? 0);
+            $srcSlot = (int)($item['slot'] ?? 0);   // 1-based en la API de contenedores
 
-            if ($backpackSlot <= 38) {
-                $iguid = $this->nextItemGuid();
-                $this->insertItemInstance($iguid, $entry, $count, $enchStr);
-                $this->insertCharInventory($iguid, 0, $backpackSlot);
-                $backpackSlot++;
-            } else {
-                // No cabe en mochila → correo
-                $excess[] = array_merge($item, ['entry' => $entry]);
+            // Mochila: Lua 1-16 -> DB 23-38
+            if ($srcBag === 0) {
+                $dbSlot = self::BACKPACK_START + $srcSlot - 1;
+                if ($srcSlot >= 1 && $dbSlot <= self::BACKPACK_END && !isset($this->usedRootSlots[$dbSlot])) {
+                    $this->storeAt($item, 0, $dbSlot);
+                    $this->usedRootSlots[$dbSlot] = true;
+                    continue;
+                }
+                $pending[] = $item;
+                continue;
             }
+
+            // Bolsa equipada N (1-4) -> contenedor en DB slot 18+N
+            $bagDbSlot = self::BAG_SLOT_START + $srcBag - 1;
+            $bag       = $this->equippedBags[$bagDbSlot] ?? null;
+            $inBagSlot = $srcSlot - 1;
+            if ($bag !== null && $inBagSlot >= 0 && $inBagSlot < $bag['slots']
+                && !isset($bag['used'][$inBagSlot])) {
+                $this->storeAt($item, $bag['guid'], $inBagSlot);
+                $this->equippedBags[$bagDbSlot]['used'][$inBagSlot] = true;
+                continue;
+            }
+            $pending[] = $item;
         }
 
+        // ── 3) Lo que no encajo donde venia: primer hueco libre ──
+        $excess = [];
+        foreach ($pending as $item) {
+            if (!$this->storeInFirstFreeSlot($item)) {
+                $excess[] = $item;
+            }
+        }
         return $excess;
+    }
+
+    /**
+     * Carga InventoryType de los items equipados que aun no estan en el meta
+     * (buildEquipmentCache ya cubre la mayoria).
+     */
+    private function loadEquippedMeta(array $equipped): void
+    {
+        $missing = [];
+        foreach ($equipped as $item) {
+            $entry = $this->convertItem((int)($item['entry'] ?? 0));
+            if ($entry > 0 && !isset($this->equippedItemMeta[$entry])) {
+                $missing[] = $entry;
+            }
+        }
+        if (empty($missing)) return;
+
+        foreach ($this->loadInventoryTypes($missing) as $entry => $invType) {
+            if (!isset($this->equippedItemMeta[$entry])) {
+                $obj                = new stdClass();
+                $obj->InventoryType = $invType;
+                $obj->displayid     = 0;
+                $this->equippedItemMeta[$entry] = $obj;
+            }
+        }
+    }
+
+    /** Inserta el item en una posicion concreta (bag = 0 o guid de contenedor). */
+    private function storeAt(array $item, int $bag, int $slot): void
+    {
+        $iguid = $this->nextItemGuid();
+        $this->insertItemInstance(
+            $iguid,
+            (int)$item['entry'],
+            max(1, (int)($item['count'] ?? 1)),
+            $this->buildEnchStr($item)
+        );
+        $this->insertCharInventory($iguid, $bag, $slot);
+    }
+
+    /**
+     * Mete el item en el primer hueco libre: mochila primero, luego las bolsas
+     * equipadas. Devuelve false si no queda sitio (el item va por correo).
+     */
+    private function storeInFirstFreeSlot(array $item): bool
+    {
+        for ($slot = self::BACKPACK_START; $slot <= self::BACKPACK_END; $slot++) {
+            if (!isset($this->usedRootSlots[$slot])) {
+                $this->storeAt($item, 0, $slot);
+                $this->usedRootSlots[$slot] = true;
+                return true;
+            }
+        }
+        foreach ($this->equippedBags as $dbSlot => $bag) {
+            for ($i = 0; $i < $bag['slots']; $i++) {
+                if (!isset($bag['used'][$i])) {
+                    $this->storeAt($item, $bag['guid'], $i);
+                    $this->equippedBags[$dbSlot]['used'][$i] = true;
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     // ── Banco ────────────────────────────────────────────────
     //
-    // @return array Items que NO cupieron en el banco (para correo)
+    // El addon exporta los 28 slots directos con su posicion absoluta
+    // (bag = -1, slot 39-66) y el contenido de las bolsas de banco con bag
+    // 5-10. Las bolsas de banco en si (DB 67-73) no las exporta, asi que su
+    // contenido se reparte por los huecos libres del banco.
+    //
+    // @return array Items que NO cupieron en el banco
 
     private function insertBank(): array
     {
         $bank    = $this->data['bank'] ?? [];
         $excess  = [];
-        $bankSlot = 39;  // banco slots 39-66 (28 slots directos)
+        $pending = [];
 
         foreach ($bank as $item) {
             $entry = (int)($item['entry'] ?? 0);
-            if ($entry <= 0) continue;
-            if ($this->isBlockedItem($entry)) continue;
+            if ($entry <= 0 || $this->isBlockedItem($entry)) continue;
             $entry = $this->convertItem($entry);
             if (!$this->isValidEntry($entry)) {
                 error_log("[Migrador] Item entry={$entry} no existe en item_template, omitido (bank).");
                 continue;
             }
+            $item['entry'] = $entry;
 
-            $count   = max(1, (int)($item['count'] ?? 1));
-            $enchStr = $this->buildEnchStr($item);
+            $srcBag  = (int)($item['bag']  ?? -1);
+            $srcSlot = (int)($item['slot'] ?? 0);
 
-            if ($bankSlot <= 66) {
-                $iguid = $this->nextItemGuid();
-                $this->insertItemInstance($iguid, $entry, $count, $enchStr);
-                $this->insertCharInventory($iguid, 0, $bankSlot);
-                $bankSlot++;
-            } else {
-                $excess[] = array_merge($item, ['entry' => $entry]);
+            if ($srcBag === -1
+                && $srcSlot >= self::BANK_START && $srcSlot <= self::BANK_END
+                && !isset($this->usedRootSlots[$srcSlot])) {
+                $this->storeAt($item, 0, $srcSlot);
+                $this->usedRootSlots[$srcSlot] = true;
+                continue;
             }
+            $pending[] = $item;
+        }
+
+        foreach ($pending as $item) {
+            $placed = false;
+            for ($slot = self::BANK_START; $slot <= self::BANK_END; $slot++) {
+                if (!isset($this->usedRootSlots[$slot])) {
+                    $this->storeAt($item, 0, $slot);
+                    $this->usedRootSlots[$slot] = true;
+                    $placed = true;
+                    break;
+                }
+            }
+            if (!$placed) $excess[] = $item;
         }
 
         return $excess;
     }
-
     // ── Envío de items excedentes por correo ─────────────────
 
     private function mailExcessItems(array $items): void
@@ -960,6 +1064,52 @@ class CharacterImporter
         );
         foreach ($rows as $r) {
             $stmt->execute([$this->newGuid, (int)$r->button, (int)$r->action, (int)$r->type]);
+        }
+    }
+
+    // ── Quests en curso ──────────────────────────────────────
+    //
+    // El addon exporta el log de quests con su id y si estan completas, pero no
+    // el progreso de cada objetivo, asi que las incompletas entran con los
+    // contadores a cero y el jugador rehace los objetivos.
+    //
+    // Los ids se validan contra quest_template: el core ignora en silencio una
+    // quest que no existe (Player::_LoadQuestStatus), pero no dejamos basura en
+    // la DB por un dump desincronizado.
+
+    private function insertQuests(): void
+    {
+        $quests = $this->data['quests'] ?? [];
+        if (empty($quests)) return;
+
+        $ids = [];
+        foreach ($quests as $q) {
+            $id = (int)($q['id'] ?? 0);
+            if ($id > 0) $ids[$id] = true;
+        }
+        if (empty($ids)) return;
+
+        $w = $this->worldDb();
+        try {
+            $in    = implode(',', array_keys($ids));
+            $valid = $this->pdo->query("SELECT ID FROM {$w}.quest_template WHERE ID IN ({$in})")
+                               ->fetchAll(PDO::FETCH_COLUMN);
+        } catch (Throwable $e) {
+            error_log('[Migrador] lookup de quest_template falló: ' . $e->getMessage());
+            return;
+        }
+        $valid = array_flip(array_map('intval', $valid));
+        if (empty($valid)) return;
+
+        // QuestDef.h: QUEST_STATUS_COMPLETE = 1, QUEST_STATUS_INCOMPLETE = 3
+        $stmt = $this->pdo->prepare(
+            'INSERT IGNORE INTO `character_queststatus` (`guid`,`quest`,`status`,`explored`)
+             VALUES (?,?,?,0)'
+        );
+        foreach ($quests as $q) {
+            $id = (int)($q['id'] ?? 0);
+            if ($id <= 0 || !isset($valid[$id])) continue;
+            $stmt->execute([$this->newGuid, $id, !empty($q['complete']) ? 1 : 3]);
         }
     }
 

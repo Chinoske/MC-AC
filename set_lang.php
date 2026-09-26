@@ -18,7 +18,12 @@ $return = (string) ($_GET['return'] ?? '/index.php');
 if ($return === '' || $return === '/') {
     $return = '/index.php';
 }
-if (!str_starts_with($return, '/') || str_starts_with($return, '//') || str_contains($return, '://')) {
+// Los navegadores tratan la barra invertida como una normal, asi que "/\evil"
+// acaba siendo "//evil": un redirect externo.
+if (!str_starts_with($return, '/')
+    || str_starts_with($return, '//')
+    || str_contains($return, chr(92))
+    || str_contains($return, '://')) {
     $return = '/index.php';
 }
 

@@ -26,10 +26,28 @@ if (!Token::check(Input::get('token'))) {
 }
 
 $transferId = (int) Input::get('id');
-$realmId    = (int) Input::get('realm');
-$guid       = (int) Input::get('guid');
 
-if ($transferId <= 0 || $realmId <= 0 || $guid <= 0) {
+if ($transferId <= 0) {
+    Session::flash('error', t('invalid_params'));
+    header('Location: ../dashboard.php');
+    exit;
+}
+
+// El guid y el realm salen de la transferencia, no del POST: antes se podian
+// reenviar por correo los items de cualquier personaje del servidor.
+$row = DB::auth()->row(
+    'SELECT `cGUID`, `cRealmID` FROM `account_transfer` WHERE `id` = ? LIMIT 1',
+    [$transferId]
+);
+if (!$row) {
+    Session::flash('error', t('transfer_not_found'));
+    header('Location: ../dashboard.php');
+    exit;
+}
+$guid    = (int) $row->cGUID;
+$realmId = (int) $row->cRealmID;
+
+if ($guid <= 0 || !isset(REALMS[$realmId])) {
     Session::flash('error', t('invalid_params'));
     header('Location: ../dashboard.php');
     exit;
