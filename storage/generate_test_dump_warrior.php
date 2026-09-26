@@ -5,6 +5,11 @@
  * Uso: php generate_test_dump_warrior.php
  */
 
+if (PHP_SAPI !== 'cli') {
+    http_response_code(403);
+    exit("Solo por consola.\n");
+}
+
 $data = [
     'version'     => 2,
     'exported_at' => time(),

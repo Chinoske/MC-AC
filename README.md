@@ -138,7 +138,9 @@ php api/precache_icons.php
 O desde el navegador, **con una sesión de GM abierta**:
 `http://localhost:8080/api/precache_icons.php`
 
-Procesa los ~46 000 items de `item_template` en ~75 s y genera `storage/icon_cache/`.  
+Procesa los ~46 000 items de `item_template` en ~75 s y genera `storage/icon_cache/`.
+Lleva `set_time_limit(0)`: por navegador se cortaba a los 30 s de
+`max_execution_time` a media faena.  
 Para forzar reconstrucción: `?reset=1`
 
 > `ItemDisplayInfo.dbc` lo extrae AzerothCore automáticamente con el extractor de datos del cliente de WoW.
@@ -352,7 +354,8 @@ entry ──> api/icon.php ──> storage/icon_cache/<entry>.txt ──> CDN Wo
 | Sesiones | Cookie básica | `httponly + samesite=Lax + secure` |
 | UI      | Tablas HTML 4 + inline styles | **HTML5 + CSS Grid + tema oscuro WoW** |
 | account_access | `gmlevel` en `account` | **`account_access.gmlevel`** |
-| Errores | `die("SHIT HAPPENS")` | **Flash messages + logs PHP** |
+| Errores | `die("SHIT HAPPENS")` | **Flash messages + `php/php_errors.log`** |
+| php.ini | El de desarrollo | **Sin `display_errors` ni trazas con argumentos** |
 | Paso 2 | Formulario de nombre | **Character Sheet visual** con íconos, calidades y stats |
 | Íconos | Ninguno | **DBC local** → caché de archivo → CDN WoWHead |
 | Formato de dump | SQL ejecutado con `exec()` | **JSON validado campo a campo** |
@@ -371,7 +374,10 @@ entry ──> api/icon.php ──> storage/icon_cache/<entry>.txt ──> CDN Wo
 - **Sesiones** con `httponly`, `samesite=Lax`, regeneración en login
 - **Acceso por rol**: GMs ven panel completo; jugadores solo sus transferencias
 - **Verificación de propiedad**: jugadores solo cancelan sus propias transferencias
-- **Límite de tamaño** en uploads (5 MB)
+- **Límite de tamaño** en uploads (5 MB). `upload_max_filesize` venía en `2M`, por
+  debajo de lo que valida el código, así que un dump de entre 2 y 5 MB moría en PHP
+  antes de llegar al chequeo y salía como "archivo inválido" en vez de "demasiado
+  grande"
 - **`router.php`** — el servidor que arranca `Iniciar.bat` es el *built-in server*
   de PHP (`php -S`), que **no lee `.htaccess`** (eso es exclusivo de Apache). El
   router aplica en cada request los headers de seguridad (`X-Frame-Options`,
@@ -380,6 +386,14 @@ entry ──> api/icon.php ──> storage/icon_cache/<entry>.txt ──> CDN Wo
   `.ini` — protecciones que antes solo existían en `.htaccess` y nunca se
   aplicaban en la práctica. El patrón de `/storage/` va con `/i`: en Windows el
   filesystem no distingue mayúsculas, así que `GET /Storage/…` servía el archivo.
+- **`php/php.ini` endurecido** — venía el de desarrollo, con `display_errors` y
+  `display_startup_errors` encendidos y `zend.exception_ignore_args` apagado. Eso
+  volcaba al navegador del visitante cualquier error con su traza, rutas absolutas
+  del servidor incluidas, **y los argumentos de cada llamada**: una excepción
+  dentro de `User::login()` imprimía la contraseña del jugador. Ahora los errores
+  van a `php/php_errors.log` y no a pantalla, `expose_php` está en `Off` y
+  `session.use_strict_mode` en `1` (fijación de sesión). Las contraseñas van
+  además con `#[SensitiveParameter]`, que PHP tacha en las trazas.
 - **Los proxies del visor 3D y de íconos piden sesión** (`api/model_proxy.php`,
   `api/wotlk_display.php`, `api/icon.php`) y verifican el certificado TLS. Antes
   eran anónimos, escribían en disco y traían el contenido sin verificar el

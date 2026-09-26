@@ -452,6 +452,36 @@ if ($offenders) {
 check('ninguna NOT NULL vale NULL', count($offenders), 0);
 check('characters.taximask no es NULL', $ch['taximask'] ?? 'x', '');
 
+note('=== 20. php.ini no es el de desarrollo ===');
+// El repo distribuye su propio PHP, asi que el php.ini es parte del producto.
+// Venia el de desarrollo: display_errors mostraba las trazas al visitante y
+// zend.exception_ignore_args=Off metia en ellas los argumentos de cada llamada,
+// contraseña de login incluida.
+$off = fn(string $k): bool => in_array(strtolower((string) ini_get($k)), ['', '0', 'off'], true);
+check('display_errors apagado', $off('display_errors'), true);
+check('display_startup_errors apagado', $off('display_startup_errors'), true);
+check('expose_php apagado', $off('expose_php'), true);
+check('log_errors encendido', $off('log_errors'), false);
+check('error_log configurado', ini_get('error_log') !== '', true);
+check('zend.exception_ignore_args encendido', $off('zend.exception_ignore_args'), false);
+check('session.use_strict_mode encendido', $off('session.use_strict_mode'), false);
+
+// El codigo rechaza a mano lo que pase de 5 MB, asi que el limite de PHP tiene
+// que dejar llegar justo eso: con 2M el upload moria antes con otro mensaje.
+$toBytes = function (string $v): int {
+    $n = (int) $v;
+    return match (strtolower(substr($v, -1))) { 'g' => $n << 30, 'm' => $n << 20, 'k' => $n << 10, default => $n };
+};
+check('upload_max_filesize deja subir 5 MB', $toBytes((string) ini_get('upload_max_filesize')) >= 5 * 1024 * 1024, true);
+check('post_max_size por encima de upload_max_filesize',
+    $toBytes((string) ini_get('post_max_size')) >= $toBytes((string) ini_get('upload_max_filesize')), true);
+
+// #[SensitiveParameter] en las contraseñas: sin eso la traza las imprime
+$r = new ReflectionMethod(User::class, 'login');
+$pwd = $r->getParameters()[1];
+check('User::login marca la contraseña como sensible',
+    $pwd->getAttributes(SensitiveParameter::class) !== [], true);
+
 } finally {
     if ($keep) {
         echo "\nDBs de prueba conservadas (--keep): " . TEST_AUTH . ', ' . TEST_CHARS . "\n";

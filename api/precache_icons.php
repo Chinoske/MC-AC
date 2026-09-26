@@ -35,6 +35,10 @@ if (!$isCli) {
     ob_end_flush();
 }
 
+// Procesar ~46 000 items pasa de los 30 s de max_execution_time. Por consola no
+// hay limite, pero por navegador se cortaba a media faena.
+set_time_limit(0);
+
 $t0 = microtime(true);
 
 require_once dirname(__DIR__) . '/config.php';
