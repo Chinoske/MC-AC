@@ -2,6 +2,9 @@
 /**
  * User — Autenticación compatible con AzerothCore WotLK 3.3.5a (SRP6)
  *
+ * Los parámetros de contraseña van con #[SensitiveParameter]: PHP los tacha en
+ * las trazas, que si no muestran los argumentos de cada llamada.
+ *
  * AzerothCore moderno (post-2021) usa SRP6:
  *   salt     = 32 bytes aleatorios (binary(32))
  *   verifier = g^x mod N  donde:
@@ -34,7 +37,7 @@ class User
      * Intenta hacer login con usuario y contraseña.
      * Usa SRP6 para verificar — compatible con AzerothCore última revisión.
      */
-    public function login(string $username, string $password): bool
+    public function login(string $username, #[SensitiveParameter] string $password): bool
     {
         try {
             // HEX() para leer columnas binary(32) sin problemas de encoding en PDO
@@ -83,7 +86,7 @@ class User
      */
     private function verifySRP6(
         string $username,
-        string $password,
+        #[SensitiveParameter] string $password,
         string $saltBin,
         string $verifBin
     ): bool {
